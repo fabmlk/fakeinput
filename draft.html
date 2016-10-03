@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <script   src="https://code.jquery.com/jquery-2.2.4.js"   integrity="sha256-iT6Q9iMJYuQiMWNd9lDyBUStIq/8PuOW33aOqmvFpqI="   crossorigin="anonymous"></script>
+    <script   src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"   integrity="sha256-T0Vest3yCU7pafRw9r+settMBX6JkKN06dqBnpQ8d30="   crossorigin="anonymous"></script>
+    <script src="jquery.minkeyboard.js"></script>
+    <link rel="stylesheet" href="jquery.minkeyboard.css">
+    <style title="fakeInput">
+        @keyframes blink {
+            50% {
+                color: transparent;
+            }
+        }
+
+        #fakeInput {
+            position: relative;
+            overflow: hidden;
+        }
+
+        #fakeCaret {
+            position: absolute;
+            animation: 1s blink infinite steps(1);
+        }
+
+        .inert {
+            position: absolute;
+            /* position: absolute changes display to block.
+               We set display explicitly so that makeInert() can returns default display style too. */
+            display: block; /* could be anything actually */
+            visibility: hidden;
+            z-index: -1;
+            user-select: none;
+            pointer-events: none;
+        }
+
+    </style>
+</head>
+<body>
+<input type="text" value="toto" pattern="[0-5]+"/>
+    <label for="fakeInput">
+        FakeInput
+    </label>
+    <span id="fakeInput" value="toto" tabindex="1">
+        <!-- setting tabindex > 0 enables focusable and key events -->
+
+
+
+    </span>
+    <script>
+
+        function getSheetFromTitle(title) {
+            var sheet = null;
+
+            for (var i = 0; i < document.styleSheets.length; i++) {
+                sheet = document.styleSheets[i];
+                if (sheet.title === title) {
+                    break;
+                }
+            }
+            return sheet;
+        }
+
+        function getStyle(selector, sheet) {
+            sheet = sheet || {};
+            var styleMatchMap = {};
+            var cssRules = sheet.cssRules || [];
+            var cssStyleDeclaration = {};
+
+            for (var x = 0; x < cssRules.length; x++) {
+                if (cssRules[x].selectorText == selector) {
+                    cssStyleDeclaration = cssRules[x].style;
+                    for(var prop in cssStyleDeclaration) {
+                        if (cssStyleDeclaration.hasOwnProperty(prop) &&
+                                typeof cssStyleDeclaration[prop] === "string" &&
+                                isNaN(prop) === true &&
+                                cssStyleDeclaration[prop] !== "" &&
+                                prop !== "cssText") {
+                            styleMatchMap[prop] = cssStyleDeclaration[prop];
+                        }
+                    }
+                    return styleMatchMap;
+                }
+            }
+            return styleMatchMap;
+        }
+
+
+
+        function showCursor(elm) {
+            var coords = getCaretCoordinates(elm);
+            var eltCompStyles = window.getComputedStyle(elm);
+            var fakeCaret = document.getElementById("fakeCaret");
+            fakeCaret.style.cssText = "top: " + coords[0] + "px;" +
+                    "left: " + coords[1] + "px;" +
+                    "height: " + elm.offsetHeight + "px;"; //+
+//                    "line-height: " + eltCompStyles.lineHeight + ";";
+            unmakeInert(fakeCaret);
+        }
+
+
+        function makeInert(elm) {
+            var defaults = window.getComputedStyle(elm);
+            var inertStyle = getStyle('.inert', getSheetFromTitle("fakeInput"));
+            var overridenByInertStyles = {};
+
+            elm.setAttribute("data-tabindex", elm.getAttribute("tabindex"));
+            elm.setAttribute("tabindex", "-1");
+
+            elm.classList.add("inert");
+
+            for (var prop in inertStyle) {
+                if (inertStyle.hasOwnProperty(prop)) {
+                    overridenByInertStyles[prop] = defaults[prop] || "initial";
+                }
+            }
+            return overridenByInertStyles;
+        }
+
+        function unmakeInert(elm) {
+            elm.classList.remove("inert");
+            elm.setAttribute("tabindex", elm.getAttribute("data-tabindex"));
+        }
+
+
+
+
+
+        function impersonateInputStyle(elm) {
+            var input = document.getElementById("impersonated-input"),
+                    stylesToRestore = {};
+
+            if (!input) {
+                input = document.createElement("input");
+                input.setAttribute("type", "text");
+                input.id = "impersonated-input";
+                stylesToRestore = makeInert(input);
+                document.body.appendChild(input);
+                var stylesheet = getSheetFromTitle("fakeInput");
+                var computedInputStyle = window.getComputedStyle(input);
+
+                stylesheet.insertRule('.fakeInput {' + computedInputStyle.cssText + ')', 0);
+
+                for (var prop in stylesToRestore) {
+                    if (stylesToRestore.hasOwnProperty(prop)) {
+                        stylesheet.cssRules[0].style[prop] = stylesToRestore[prop];
+                    }
+                }
+            }
+            elm.classList.add("fakeInput");
+            elm.textContent = elm.getAttribute("value") || "";
+            elm.selectionStart = elm.selectionEnd = elm.textContent.length;
+        }
+
+        function initCaret(caretChar) {
+            var caret = document.getElementById("fakeCaret");
+
+            if (!caret) {
+                caret = document.createElement("span");
+                caret.id = "fakeCaret";
+                caret.textContent = caretChar || '|';
+                makeInert(caret);
+                document.body.appendChild(caret);
+            }
+        }
+
+        function impersonateInputAttributes(elm) {
+            Object.defineProperties(elm,{
+                'value': {
+                    get: function () {
+                        return elm.textContent;
+                    },
+                    set: function (val) {
+                        elm.textContent = val;
+                        elm.selectionStart = elm.selectionEnd = val.length;
+                    }
+                },
+            });
+            elm.selectionStart = 0;
+            elm.selectionEnd = 0;
+            elm.focus = function () {
+                var focusEvent = new FocusEvent("focus");
+                elm.dispatchEvent(focusEvent);
+            };
+            elm.blur = function () {
+                var blurEvent = new FocusEvent("blur"); // Blur hérite de FocusEvent interface
+                elm.dispatchEvent(blurEvent);
+            };
+        }
+
+        function getElementTextContentWidth(text, fontStyle) {
+            var span = document.getElementById("impersonated-span");
+            if (!span) {
+                span = document.createElement("span");
+                span.id = "impersonated-span";
+                makeInert(span);
+                document.body.appendChild(span);
+            }
+
+            span.style.font = fontStyle;
+            span.textContent = text;
+            return span.getBoundingClientRect().width;
+        }
+
+        function getCaretPos(elm, mouseX) {
+            var text = elm.textContent,
+                totalW = 0,
+                pos = text.length,
+                letterWidth = 0
+            ;
+
+            // loop through each character to identify the position
+            for (var i=0; i<text.length; i++) {
+                letterWidth = getElementTextContentWidth(text[i], elm.style.font);
+                totalW += letterWidth;
+                if (totalW >= mouseX + parseInt(elm.style.paddingLeft,0) + parseInt(elm.style.borderLeftWidth, 0)) {
+                    pos = i;
+                    break;
+                }
+            }
+            return pos;
+        }
+
+        function getCaretCoordinates(elm) {
+            var textNode = elm.childNodes[0];
+            var compStyles = window.getComputedStyle(elm);
+            var range = document.createRange();
+
+            range.setStart(textNode, 0);
+            range.setEnd(textNode, Math.min(elm.selectionEnd, textNode.length));
+
+            var rangeRect = range.getBoundingClientRect();
+            var elmRect = elm.getBoundingClientRect();
+
+            return [
+                elmRect.top,
+                rangeRect.right - 1 // shift 1 pixel
+            ];
+        }
+
+        function getSelectionRangePos(elm) {
+            var range, start = -1, end = -1;
+            var userSelection = window.getSelection();
+
+            if (userSelection.rangeCount > 0) {
+                range = userSelection.getRangeAt(0);
+            }
+
+            if (userSelection.anchorNode === elm.childNodes[0]) {
+                start = userSelection.anchorOffset;
+                end = start + userSelection.toString().length;
+            }
+
+            return [start, end];
+        }
+
+
+
+
+
+        var fakeInput = document.getElementById("fakeInput");
+
+        impersonateInputStyle(fakeInput);
+        impersonateInputAttributes(fakeInput);
+        initCaret();
+
+        fakeInput.addEventListener("click", function (e) {
+            var selectionRange = getSelectionRangePos(this);
+
+            // Oddly, when we click to the very far left of the element, the selectionRange detects
+            // the adjacent of this one, though we know we are inside the node!
+            // This does not seam to occur at the very far right, so we can be safe to assume we are in this
+            // situation when we detect -1.
+            // Bug WebKit/Blink? Anyway, in that case force selection at the start.
+            this.selectionStart = selectionRange[0] === -1 ? 0 : selectionRange[0];
+            this.selectionEnd = selectionRange[1] === -1 ? 0 : selectionRange[1];
+
+            showCursor(this);
+        });
+
+        fakeInput.addEventListener("focus", function () {
+            showCursor(this);
+        });
+
+        fakeInput.addEventListener("blur", function () {
+            makeInert(document.getElementById("fakeCaret"));
+        });
+
+
+        document.addEventListener("click", function (e) {
+            if (e.target !== fakeInput) {
+                fakeInput.blur();
+            }
+        });
+
+        fakeInput.addEventListener("keypress", function (e) {
+            var selStart = this.selectionStart;
+            var selEnd = this.selectionEnd;
+            var value = this.value;
+
+            if (e.which !== 13) { // "Enter"
+                this.value = value.slice(0, selStart) + e.key + value.slice(selEnd);
+                this.selectionStart = this.selectionEnd = selStart + 1;
+                showCursor(this);
+            }
+        });
+        fakeInput.addEventListener("keydown", function (e) {
+            var selStart = this.selectionStart;
+            var selEnd = this.selectionEnd;
+            var value = this.value;
+
+            if (e.which === 8 || e.which === 46) { // backspace or del
+                if (selEnd === selStart) { // pas de text selected
+                    selStart = selStart > 0 ? selStart - 1 : selStart;
+                }
+                this.value = value.slice(0, selStart) + value.slice(selEnd);
+                this.selectionStart = this.selectionEnd = selStart;
+                showCursor(this);
+                return false;
+            }
+            if (e.which === 37) { // left arrow
+                this.selectionStart = this.selectionEnd = Math.max(this.selectionStart - 1, 0);
+                showCursor(this);
+            } else if (e.which == 39) { // right arrow
+                this.selectionStart = this.selectionEnd = Math.min(this.selectionEnd + 1, this.value.length);
+                showCursor(this);
+            }
+
+
+            return true;
+        });
+
+
+
+        //////////////////////// CLIENT ////////////////////////////
+
+        $("#fakeInput").minkeyboard();
+        document.addEventListener("minkeypress", function (e) {
+            if ($(e.target).closest(".fab-bminkeyboard-key").length) {
+                  $(e.target);
+            };
+        });
+
+    </script>
+</body>
+</html>
