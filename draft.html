@@ -38,7 +38,7 @@
     </style>
 </head>
 <body>
-<input type="text" value="toto" pattern="[0-5]+"/>
+<input type="text" value="toto" pattern="[0-5]+" readonly />
     <label for="fakeInput">
         FakeInput
     </label>
@@ -235,7 +235,7 @@
 
             return [
                 elmRect.top,
-                rangeRect.right - 1 // shift 1 pixel
+                rangeRect.right - 3 // shift 1 pixel
             ];
         }
 
@@ -277,10 +277,14 @@
             this.selectionEnd = selectionRange[1] === -1 ? 0 : selectionRange[1];
 
             showCursor(this);
+            console.log("clicked");
+            this.focus();
+            e.stopPropagation();
         });
 
         fakeInput.addEventListener("focus", function () {
             showCursor(this);
+            console.log("focussed");
         });
 
         fakeInput.addEventListener("blur", function () {
@@ -291,6 +295,7 @@
         document.addEventListener("click", function (e) {
             if (e.target !== fakeInput) {
                 fakeInput.blur();
+                console.log("blurred");
             }
         });
 
