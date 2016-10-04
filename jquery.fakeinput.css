@@ -1,0 +1,15 @@
+@keyframes blink {
+    50% {
+        color: transparent;
+    }
+}
+
+.fab-fakeinput {
+    position: relative;
+    overflow: hidden;
+}
+
+.fab-fakeinput-fakecaret {
+    position: absolute;
+    animation: 1s blink infinite steps(1);
+}
