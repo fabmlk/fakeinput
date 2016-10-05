@@ -106,7 +106,7 @@
                             styleMatchMap[prop] = cssStyleDeclaration[prop];
                         }
                     }
-                    return styleMatchMap;
+                    break;
                 }
             }
             return styleMatchMap;
