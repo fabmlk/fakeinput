@@ -21,12 +21,12 @@
 
     function FakeInput() {
         this.defaults = {
-
+            rightAdjustment: 3
         };
     }
 
     $.extend(FakeInput.prototype, {
-        markerClassName: 'fab-isFakeInput',
+        markerClassName: 'fab-fakeinput',
         propertyName: 'fab-fakeinput',
 
         setDefaults: function (options) {
@@ -44,10 +44,6 @@
 
             inst = {
                 options: $.extend({}, this.defaults),
-                textOverflow: {
-                    left: "",
-                    right: ""
-                }
             };
 
             if (target.is("input[type='text']")) { // if an input text is specified, replace it
@@ -61,7 +57,8 @@
 
 
             target.data(this.propertyName, inst)
-                .attr("tabindex", "1"); // make it focusable/tabbable
+                .attr("tabindex", "1") // make it focusable/tabbable
+                .html("<span class='" + this.markerClassName + "-textnode'>" + (target.attr("value") || "") + "</span>"); // fake text node
 
             this._setCaretPlugin();
             this._impersonateInputStyle(target);
@@ -104,7 +101,7 @@
             caretChar = caretChar || '|';
 
             if (!$fakeCaret.length) {
-                $fakeCaret = $("<span id='" + this.propertyName + "-fakecaret' class='"+ this.propertyName +"-fakecaret'></span>");
+                $fakeCaret = $("<span id='" + this.markerClassName + "-fakecaret' class='"+ this.markerClassName +"-fakecaret'></span>");
                 StyleHelper.makeInert($fakeCaret[0]);
                 $("body").append($fakeCaret);
             }
@@ -114,7 +111,7 @@
 
 
         _impersonateInputStyle: function ($target) {
-            var $realInput = $('#' + this.propertyName + '-impersonated-input'),
+            var $realInput = $('#' + this.markerClassName + '-impersonated-input'),
                 stylesToRestore = {},
                 computedInputStyle = {},
                 realInputStyle = null,
@@ -126,7 +123,7 @@
 
             if (!$realInput.length) {
 
-                $realInput = $("<input type='text' id='" + this.propertyName + "-impersonated-input'>");
+                $realInput = $("<input type='text' id='" + this.markerClassName + "-impersonated-input'>");
                 stylesToRestore = StyleHelper.makeInert($realInput[0]);
                 $("body").append($realInput);
 
@@ -156,29 +153,14 @@
 
             Object.defineProperty(target, "value", {
                 get: function () {
-                    return inst.textOverflow.left + $target.text() + inst.textOverflow.right;
+                    return $target.children().text();
                 },
                 set: function (val) {
-                    var adjustedVal,
-                        overflowIdx = plugin._getIndexOverflowing($target, val)
-                    ;
-
-                    if (overflowIdx !== -1) {
-                        inst.textOverflow.right = val.substring(overflowIdx);
-                        adjustedVal = val.substring(0, overflowIdx);
-                    } else {
-                        adjustedVal = val;
-                    }
-
-                    $target.text(adjustedVal);
+                    $target.children().text(val);
                 }
             });
 
-            $target.val($target.attr("value") || ""); // make use of what we've just setup above
-            target.selectionStart = target.selectionEnd = $target.text().length;
-            if (target.selectionEnd > target.textContent.length) {
-                debugger;
-            }
+            target.selectionStart = target.selectionEnd = $target.children().text().length;
 
             target.focus = function () {
                 // don't use jquery trigger as it will call .focus() => infinite loop!
@@ -194,52 +176,69 @@
         },
 
 
-        _getIndexOverflowing: function ($target, value) {
-            var testValue = value[0];
-
-            for (var i = 1; i < value.length; i++) {
-                testValue += value[i];
-                if (plugin._isValueOverflowing($target, testValue)) {
-                    return i;
-                }
-            }
-            return -1;
-        },
-
-
-        _isValueOverflowing: function ($target, value) {
-            var fontStyle = window.getComputedStyle($target[0]).font,
-                textWidth = this._getTextContentWidth(value, fontStyle);
-            ;
-
-            return $target.innerWidth() < textWidth;
-        },
-
-
-
-        _getCaretCoordinates: function ($target) {
+        _getNewCaretCoordinates: function ($target) {
             var target = $target[0],
-                textNode = target.childNodes[0],   // the text node is always the first child
+                rightAdjustment = $target.data(this.propertyName).rightAdjustment,
+                $fakeTextNode = $target.children(),
+                realTextNode = $fakeTextNode[0].childNodes[0],
                 range = document.createRange(),
                 rangeRect,
-                targetRect
+                targetRect,
+                adjustedRangeRectLeft,
+                adjustedTargetRectRight,
+                newTop,
+                newLeft
             ;
 
-            if (textNode === undefined) {
-                textNode = document.createTextNode("");
-                $target.append(textNode);
+            if (realTextNode === undefined) {
+                realTextNode = document.createTextNode("");
+                $fakeTextNode.append(realTextNode);
             }
 
-            range.setStart(textNode, 0);
-            range.setEnd(textNode, target.selectionEnd);
+            // create range from first char to selectionEnd
+            range.setStart(realTextNode, 0);
+            range.setEnd(realTextNode, target.selectionEnd);
 
             rangeRect = range.getBoundingClientRect();
             targetRect = target.getBoundingClientRect();
 
+            // rectangle objects are readonly, so we have to introduce new variables to adjust the values
+            adjustedRangeRectLeft = rangeRect.left - (parseInt($fakeTextNode.css("left"), 0) || 0);
+            adjustedTargetRectRight = targetRect.right - rightAdjustment;
+
+            newTop = targetRect.top;
+            newLeft = rangeRect.right;
+
+            // prevent going outside fake input borders
+            if (rangeRect.right > adjustedTargetRectRight) {
+                newLeft = adjustedTargetRectRight;
+            }
+            if (adjustedRangeRectLeft < targetRect.left) {
+                newLeft = targetRect.left;
+            }
+
             return {
-                top: Math.max(targetRect.top, 0),
-                left: Math.max(0, Math.min(rangeRect.right, targetRect.right - 3)) // prevent going further than input border right
+                top: Math.max(newTop, 0),
+                left: Math.max(0, newLeft)
             };
+        },
+
+        _getCurrentCaretCoordinates: function () {
+            var caretRect = $fakeCaret[0].getBoundingClientRect();
+
+            return {
+                top: caretRect.top,
+                left: caretRect.left
+            };
+        },
+
+        _isCaretFarRight: function ($target) {
+            var caretCoords = this._getCurrentCaretCoordinates(),
+                fakeInputCoords = $target[0].getBoundingClientRect(),
+                marginAdjustment = $target.data(this.propertyName).marginAdjustment
+            ;
+
+            return caretCoords.left === fakeInputCoords.right - marginAdjustment;
         },
 
 
@@ -247,8 +246,9 @@
             var start = -1, end = -1,
                 userSelection = window.getSelection()
             ;
+            console.log("selection from getSlectionRangePos: ", userSelection);
 
-            if (userSelection.anchorNode === $target[0].childNodes[0]) { // first child must be text node
+            if (userSelection.anchorNode === $target.children()[0].childNodes[0]) {
                 start = userSelection.anchorOffset;
                 end = start + userSelection.toString().length;
             }
@@ -260,8 +260,60 @@
         },
 
 
+        _shiftTextNodeLeft: function ($target, value) {
+            var totalWidth,
+                visibleWidth,
+                $fakeTextNode = $target.children()
+            ;
+
+            if (value === undefined) {
+                totalWidth = $target[0].scrollWidth;
+                visibleWidth = $target[0].clientWidth;
+                value = totalWidth - visibleWidth;
+            }
+
+            if (value > 0) {
+                $fakeTextNode.css("left", "-=" + value);
+            }
+        },
+
+
+        _getCharBeforeCursorWidth: function ($target) {
+            var target = $target[0],
+                charBeforeCursor =  target.value.substr(target.selectionStart - 1, 1);
+
+            return this._getTextContentWidth($target, charBeforeCursor);
+        },
+
+
+        _getCharAfterCursorWidth: function ($target) {
+            var target = $target[0],
+                charAfterCursor =  target.value.substr(target.selectionEnd, 1);
+
+            return this._getTextContentWidth($target, charAfterCursor);
+        },
+
+
+        _shiftTextNodeRight: function ($target, value) {
+            var target = $target[0],
+                charBeforeCursor,
+                $fakeTextNode = $target.children(),
+                currentShiftLeft = parseInt($fakeTextNode.css("left"), 0) || 0
+            ;
+
+            if (value === undefined) {
+                value = this._getCharBeforeCursorWidth($target);
+            }
+
+            if (currentShiftLeft < 0) {
+                $fakeTextNode.css("left", "+=" + value);
+            }
+        },
+
+
+
         _showCursor: function ($target) {
-            var coords = this._getCaretCoordinates($target);
+            var coords = this._getNewCaretCoordinates($target);
 
             $fakeCaret.css({
                 // reminder: jquery converts a number to string and append "px" when it detects a number
@@ -274,57 +326,17 @@
         },
 
 
-        _getTextContentWidth: function (text, fontStyle) {
-            if (!$textWidthCalculator.length) {
-                $textWidthCalculator = $("<span id='" + this.propertyName + "-widthcalculator'>");
-                StyleHelper.makeInert($textWidthCalculator[0]);
-                $textWidthCalculator.css({
-                    margin: 0,
-                    padding: 0,
-                    borderWidth: 0
-                });
-                $("body").append($textWidthCalculator);
-            }
-
-            $textWidthCalculator.css("font", fontStyle)
-                .text(text);
-
-            return $textWidthCalculator.innerWidth();
-        },
-
-
-        _shiftContentLeft: function ($target) {
-            var inst = $target.data(this.propertyName),
-                charBefore,
-                valueWithoutLastLetter
+        _getTextContentWidth: function ($target, text) {
+            var $fakeTextNode = $target.children(),
+                textIdx = $fakeTextNode.text().indexOf(text),
+                range = document.createRange()
             ;
 
-            if (inst.textOverflow.left.length > 0) {
-                charBefore = inst.textOverflow.left.slice(-1);
-                valueWithoutLastLetter = $target.text().slice(0, -1);
+            range.setStart($fakeTextNode[0].childNodes[0], textIdx);
+            range.setEnd($fakeTextNode[0].childNodes[0], textIdx + text.length);
 
-                $target.text(charBefore + valueWithoutLastLetter);
-
-                inst.textOverflow.left = inst.textOverflow.left.slice(0, -1);
-            }
+            return range.getBoundingClientRect().width;
         },
-
-        _shiftContentRight: function ($target) {
-            var inst = $target.data(this.propertyName),
-                charAfter,
-                valueWithoutFirstLetter
-            ;
-
-            if (inst.textOverflow.right.length > 0) {
-                charAfter = inst.textOverflow.right[0];
-                valueWithoutFirstLetter = $target.text().substring(1);
-
-                $target.text(valueWithoutFirstLetter + charAfter);
-
-                inst.textOverflow.right = inst.textOverflow.right.substring(1);
-            }
-        },
-
 
 
         _initEvents: function ($target) {
@@ -341,10 +353,6 @@
                 this.selectionStart = selectionRange.start === -1 ? 0 : selectionRange.start;
                 this.selectionEnd = selectionRange.end === -1 ? 0 : selectionRange.end;
 
-                if (this.selectionEnd > this.textContent.length) {
-                    debugger;
-                }
-
                 console.log("clicked");
                 this.focus();
 
@@ -359,28 +367,22 @@
                 StyleHelper.makeInert($fakeCaret[0]);
             })
             .on("keypress", function (e) {
-                var selStart = this.selectionStart,
-                    selEnd = this.selectionEnd,
-                    value = this.value,
-                    $this = $(this),
-                    currentLength = $this.text().length,
-                    inst = $this.data(plugin.propertyName)
-                ;
+                var selection, value = this.value;
 
                 if (e.which !== 13) { // not "Enter"
-                    this.value = value.slice(0, selStart) + e.key + value.slice(selEnd);
+                    selection = window.getSelection();
+                    if (selection.anchorNode === selection.focusNode && selection.isCollapsed === false) { // only our fake input has selection and is visible
+                        selection.deleteFromDocument();
 
-                    if (selEnd === currentLength && inst.textOverflow.right.length) {
-                        plugin._shiftContentRight($this);
-                    } else {
-                        this.selectionStart = this.selectionEnd = this.value.length;
+                        this.selectionStart = this.selectionEnd = selection.anchorOffset;
                     }
+                    this.value = value.slice(0, this.selectionStart) + e.key + value.slice(this.selectionEnd);
 
-                    if (this.selectionEnd > this.textContent.length) {
-                        debugger;
-                    }
+                    this.selectionStart = this.selectionEnd = this.selectionStart + 1;
 
-                    plugin._showCursor($this);
+                    plugin._shiftTextNodeLeft($(this));
+
+                    plugin._showCursor($(this));
                 }
             })
             .on("keydown", function (e) {
@@ -394,36 +396,43 @@
                     if (selEnd === selStart) { // pas de text selected
                         selStart = selStart > 0 ? selStart - 1 : selStart;
                     }
+                    var deletedText = value.slice(selStart, selEnd + 1);
                     this.value = value.slice(0, selStart) + value.slice(selEnd);
+
                     this.selectionStart = this.selectionEnd = selStart;
 
-                    if (this.selectionEnd > target.textContent.length) {
-                        debugger;
-                    }
+                    plugin._shiftTextNodeRight($(this));//, plugin._getTextContentWidth($this, deletedText));
+
                     plugin._showCursor($this);
 
                     return false; // prevent default & stop bubbling
                 }
                 if (e.which === 37) { // left arrow
-                    if (this.selectionStart === 0) {
-                        plugin._shiftContentLeft($(this));
+                    this.selectionStart = this.selectionEnd = Math.max(this.selectionStart - 1, 0);
+
+                    var caretCoords = plugin._getNewCaretCoordinates($this),
+                        targetRect = this.getBoundingClientRect(),
+                        charBeforeCursorWidth = plugin._getCharBeforeCursorWidth($this)
+                    ;
+
+                    if (caretCoords.left - targetRect.left < charBeforeCursorWidth) {
+                        plugin._shiftTextNodeRight($this, charBeforeCursorWidth);
                     }
 
-                    this.selectionStart = this.selectionEnd = Math.max(this.selectionStart - 1, 0);
-                    if (this.selectionEnd > target.textContent.length) {
-                        debugger;
-                    }
                     plugin._showCursor($this);
 
                 } else if (e.which == 39) { // right arrow
-                    if (this.selectionEnd === this.textContent.length) {
-                        plugin._shiftContentRight($(this));
+                    this.selectionStart = this.selectionEnd = Math.min(this.selectionEnd + 1, this.textContent.length);
+
+                    var caretCoords = plugin._getNewCaretCoordinates($this),
+                        targetRect = this.getBoundingClientRect(),
+                        charAfterCursorWidth = plugin._getCharAfterCursorWidth($this)
+                    ;
+
+                    if (caretCoords.left - targetRect.right < charAfterCursorWidth) {
+                        plugin._shiftTextNodeLeft($this, charAfterCursorWidth);
                     }
 
-                    this.selectionStart = this.selectionEnd = Math.min(this.selectionEnd + 1, this.textContent.length);
-                    if (this.selectionEnd > target.textContent.length) {
-                        debugger;
-                    }
                     plugin._showCursor($this);
                 }
             });
