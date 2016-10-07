@@ -14,9 +14,7 @@
     }
 }(function ($, StyleHelper) {
 
-    var $currentlyFocused = $();
     var $fakeCaret = $(); // only one care instance for everyone
-    var $textWidthCalculator = $();
 
 
     function FakeInput() {
@@ -258,6 +256,32 @@
 
 
         /**
+         * Retrieves the width in pixels of the param text if it was to be inserted in the $target node
+         *
+         * @param {jQuery} $target - a jQuery node (typically the fake input)
+         * @param {String} text - the text whose width we want to calculate
+         * @returns {Number} the calculated width
+         * @private
+         */
+        _getTextContentWidth: function ($target, text) {
+            var $fakeTextNode = $target.children(),
+                textIdx = $fakeTextNode.text().indexOf(text),
+                range
+            ;
+
+            if (textIdx === -1) {
+                return 0;
+            }
+
+            range = document.createRange();
+            range.setStart($fakeTextNode[0].childNodes[0], textIdx);
+            range.setEnd($fakeTextNode[0].childNodes[0], textIdx + text.length);
+
+            return range.getBoundingClientRect().width;
+        },
+
+
+        /**
          * Retrieves the selection boundaries inside the fake input.
          * If the selection is collapsed, the start and the end of the selection are equal.
          *
@@ -357,7 +381,6 @@
          */
         _shiftTextNodeRight: function ($target, value) {
             var target = $target[0],
-                charBeforeCaret,
                 $fakeTextNode = $target.children(),
                 currentShiftLeft = parseInt($fakeTextNode.css("left"), 0) || 0
             ;
@@ -393,27 +416,6 @@
 
 
         /**
-         * Retrieves the width in pixels of the param text if it was to be inserted in the $target node
-         *
-         * @param {jQuery} $target - a jQuery node (typically the fake input)
-         * @param {String} text - the text whose width we want to calculate
-         * @returns {Number} the calculated width
-         * @private
-         */
-        _getTextContentWidth: function ($target, text) {
-            var $fakeTextNode = $target.children(),
-                textIdx = $fakeTextNode.text().indexOf(text),
-                range = document.createRange()
-            ;
-
-            range.setStart($fakeTextNode[0].childNodes[0], textIdx);
-            range.setEnd($fakeTextNode[0].childNodes[0], textIdx + text.length);
-
-            return range.getBoundingClientRect().width;
-        },
-
-
-        /**
          * Handle the deletion of one or multiple chars (via selection) after we:
          *  - pressed the backspace key
          *  - pressed the suppr key
@@ -422,21 +424,30 @@
          * @private
          */
         _handleDeleteKey: function ($target) {
-            var selStart = this.selectionStart,
-                selEnd = this.selectionEnd,
-                value = this.value,
-                target = $target[0]
+            var target = $target[0],
+                selStart = target.selectionStart,
+                selEnd = selStart,
+                value = target.value,
+                selection = window.getSelection(),
+                deletedTextWidth
             ;
 
-            if (selEnd === selStart) { // pas de text selected
-                selStart = selStart > 0 ? selStart - 1 : selStart;
+            if (selection.anchorNode === selection.focusNode &&
+                selection.isCollapsed === false) { // only our fake input has selection and is visible
+                deletedTextWidth = this._getTextContentWidth($target, selection.toString());
+
+                selection.deleteFromDocument();
+
+                target.selectionStart = target.selectionEnd = selection.anchorOffset;
+            } else {
+                deletedTextWidth = this._getCharsWidthRelativeToCaret($target, -1);
+
+                selStart = Math.max(selStart - 1, 0);
+                target.value = value.slice(0, selStart) + value.slice(selEnd);
+                target.selectionStart = target.selectionEnd = selStart;
             }
-            var deletedText = value.slice(selStart, selEnd + 1);
-            target.value = value.slice(0, selStart) + value.slice(selEnd);
 
-            target.selectionStart = target.selectionEnd = selStart;
-
-            this._shiftTextNodeRight($target);//, plugin._getTextContentWidth($this, deletedText));
+            this._shiftTextNodeRight($target, deletedTextWidth);
         },
 
 
@@ -505,8 +516,9 @@
          * @private
          */
         _handleCharKey: function ($target, newChar) {
-            var selection,
+            var selection = window.getSelection(),
                 target = $target[0],
+                $fakeTextNode = $target.children(),
                 value = target.value,
                 caretCoords,
                 targetRect,
@@ -515,8 +527,6 @@
                 charAfterCaretWidth,
                 caretDistanceFromEdge
             ;
-
-            selection = window.getSelection();
 
             if (selection.anchorNode === selection.focusNode &&
                 selection.isCollapsed === false) { // only our fake input has selection and is visible
@@ -548,7 +558,10 @@
          * @private
          */
         _initEvents: function ($target) {
-            $target.on("click", function (e) {
+            var target = $target[0];
+
+            // we don't use jquery events to have total controls in case it gets tricky...
+            target.addEventListener("click", function (e) {
                 var $this = $(this),
                     selectionRange = plugin._getSelectionRangePos($this)
                 ;
@@ -561,35 +574,51 @@
                 this.selectionStart = selectionRange.start === -1 ? 0 : selectionRange.start;
                 this.selectionEnd = selectionRange.end === -1 ? 0 : selectionRange.end;
 
+                plugin._showCaret($this);
                 console.log("clicked");
-                this.focus();
 
                 e.stopPropagation();
-            })
-            .on("focus", function () {
-                plugin._showCaret($(this));
-                $currentlyFocused = $(this);
+            });
+
+
+            // focus & blur events are fired automatically by the browser as the fake inputs were made focusable
+            // from adding tabindex
+
+            target.addEventListener("focus", function () {
+                var $this = $(this);
+
+                plugin._showCaret($this);
                 console.log("focused");
-            })
-            .on("blur", function () {
+            });
+
+            target.addEventListener("blur", function () {
+                // as there is only one caret instance for all fake inputs, we could think this handler
+                // should be attached on the document via bubbling/delegation instead of attaching the handler
+                // for every elements.
+                // But by definition, the blur/focus events should not bubble. We could make it bubble via jquery
+                // using delegation (see doc) but this could introduce hard to find bugs from the client script,
+                // so we stick to attaching the handler for everyone.
                 StyleHelper.makeInert($fakeCaret[0]);
-            })
-            .on("keypress", function (e) {
+                console.log("blurred");
+            });
+
+            target.addEventListener("keypress", function (e) {
                 var $this = $(this);
 
                 if (e.which !== 13) { // not "Enter"
                     plugin._handleCharKey($this, e.key);
                     plugin._showCaret($this);
                 }
-            })
-            .on("keydown", function (e) {
+            });
+
+            target.addEventListener("keydown", function (e) {
                 var $this = $(this);
 
                 if (e.which === 8 || e.which === 46) { // backspace or del
                     plugin._handleDeleteKey($this);
                     plugin._showCaret($this);
 
-                    return false; // prevent default & stop bubbling
+                    e.preventDefault(); // prevent default browser action of going back in history (or at least proposing)
                 }
                 if (e.which === 37) { // left arrow
                     plugin._handleLeftArrowKey($this);
@@ -600,17 +629,6 @@
                     plugin._showCaret($this);
                 }
             });
-
-            $(document).on("click", function (e) {
-                if (!$(e.target).is('.' + plugin.markerClassName)) {
-                    if ($currentlyFocused.length) {
-                        $currentlyFocused[0].blur();
-                        console.log("blurred");
-                    }
-                }
-            });
-
-
         }
 
 
