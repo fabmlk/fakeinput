@@ -22,7 +22,7 @@
     return {
 
         /**
-         * Creates a new <style> for the .inert class rules if not yet created.
+         * Creates a new <style> in the head for the .inert class rules if not yet created.
          * (There was a talk to add a inert attribute in HTML5 but it is not implemented and the spec
          * is not working on it so much...)
          * @returns {Stylesheet} the stylesheet we injected .inert style on
@@ -141,7 +141,7 @@
         makeInert: function (elt) {
             var defaults = window.getComputedStyle(elt),
                 inertStyle = this.getStyle('.inert', this.getInertSheet()),
-                 overridenByInertStyles = {}
+                overridenByInertStyles = {}
             ;
 
             elt.dataset.tabindex = elt.getAttribute("tabindex");

@@ -5,8 +5,13 @@
 }
 
 .fab-fakeinput {
-    position: relative !important;
+    position: relative !important; /* so we can position the text node inside */
     overflow: hidden !important;
+
+    /* As we set its position to relative, the "inherited" top & left that normally would not
+       apply on a static real input can take effect here, so we need to cancel it.*/
+    top: 0 !important;
+    left: 0 !important;
 }
 
 .fab-fakeinput-textnode {
