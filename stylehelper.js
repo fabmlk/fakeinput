@@ -1,6 +1,8 @@
 /**
  * This is a pure-JS helper module to handle various style-related actions.
  * Though part of the fake input project, this lib could be used outside of this project.
+ *
+ * Lib tested on recent versions of Chrome & Firefox.
  */
 
 // https://github.com/umdjs/umd/blob/master/templates/returnExports.js
@@ -62,6 +64,31 @@
         },
 
 
+        /**
+         * There is an old bug in Firefox where cssText returns empty "" on
+         * a CSSStyleDeclaration object (we can also notice from the Firefox debugger
+         * that getComputedStyle() returns a CSS2Properties Object instead of CSSStyleDeclaration).
+         * See https://bugzilla.mozilla.org/show_bug.cgi?id=137687.
+         * (still present in version 49.0.1).
+         *
+         * @param elt
+         * @returns {*}
+         */
+        getComputedStyleCssText: function (elt) {
+            var style = window.getComputedStyle(elt), cssText;
+
+            if (style.cssText != "") {
+                return style.cssText;
+            }
+
+            cssText = "";
+            for (var i = 0; i < style.length; i++) {
+                cssText += style[i] + ": " + style.getPropertyValue(style[i]) + "; ";
+            }
+
+            return cssText;
+        },
+
 
         /**
          * Returns the loaded stylesheet with a data-title attribute matching the argument.
@@ -91,21 +118,25 @@
             sheet = sheet || {};
             var styleMatchMap = {},
                 cssRules = sheet.cssRules || [],
-                cssStyleDeclaration = {}
+                cssStyleDeclaration = {},
+                styleAttributes
             ;
 
             for (var x = 0; x < cssRules.length; x++) {
                 if (cssRules[x].selectorText == selector) {
                     cssStyleDeclaration = cssRules[x].style;
-                    for (var prop in cssStyleDeclaration) {
-                        if (cssStyleDeclaration.hasOwnProperty(prop) &&
-                            typeof cssStyleDeclaration[prop] === "string" &&
-                            isNaN(prop) === true &&
-                            cssStyleDeclaration[prop] !== "" &&
-                            prop !== "cssText") {
-                            styleMatchMap[prop] = cssStyleDeclaration[prop];
+
+                    // cssStyleDeclaration is not completely enumerable in Firefox (bug?)
+                    // so instead we use cssText to parse the individual attributes
+                    styleAttributes = cssStyleDeclaration.cssText.split(';');
+                    styleAttributes.forEach(function (styleAttribute) {
+                        var splitStyleAttribute = styleAttribute.split(':');
+
+                        if(splitStyleAttribute.length === 2) {
+                            styleMatchMap[splitStyleAttribute[0].trim()] = splitStyleAttribute[1].trim();
                         }
-                    }
+                    });
+
                     break;
                 }
             }
@@ -133,6 +164,7 @@
             return sheet.cssRules[0].style;
         },
 
+
         /**
          * Make an element "inert" aka totally invisible in the DOM.
          * @param {HTMLElement} elt - the DOM node we want to make inert
@@ -144,16 +176,26 @@
                 overridenByInertStyles = {}
             ;
 
+            // save all default styles we will override by the .inert rule
+            // Note: this code must come before adding the .inert class as it
+            // will dynamically change our referenced defaults object in Firefox
+            // despite being read-only (not happening in Chrome).
+            for (var prop in inertStyle) {
+                if (inertStyle.hasOwnProperty(prop)) {
+                    // we make sure prop the property is camel-cased as at least Firefox
+                    // doesn't provide hyphenated properties when vendor-prefixed
+                    prop = prop.replace(/-([a-z])/g, function(str,letter) {
+                        return letter.toUpperCase();
+                    });
+                    overridenByInertStyles[prop] = defaults[prop] || "initial";
+                }
+            }
+
             elt.dataset.tabindex = elt.getAttribute("tabindex");
             elt.setAttribute("tabindex", "-1"); // prevent focusable/tabbable
 
             elt.classList.add("inert");
 
-            for (var prop in inertStyle) {
-                if (inertStyle.hasOwnProperty(prop)) {
-                    overridenByInertStyles[prop] = defaults[prop] || "initial";
-                }
-            }
             return overridenByInertStyles;
         },
 
