@@ -1,4 +1,6 @@
 /*
+ * Impersonate a input type='text' only.
+ *
  * Requirements: browser that implement:
  *  - W3C Working Draft Selection API: https://www.w3.org/TR/selection-api/
  *  - DOM Range from current Living Standard: https://dom.spec.whatwg.org/#ranges
@@ -10,8 +12,10 @@
  * - dragging a selection beyond the left or right edge
  * - moving a selection around via click + dragging
  * - creating selection from keyboard: shift+arrow key or Ctrl+A
+ * - navigating to the start or end of the input via Home and End keys
  * - outline styling on focus
  * - selectionchange event (not yet supported by browsers)
+ * - impersonation of CSS styles related to validation pseudo-classes (:invalid, :valid, :required...)
  */
 
 (function (factory) {
@@ -31,7 +35,17 @@
 }(function ($, StyleHelper) {
 
     var $fakeCaret = $(); // only one care instance for everyone
-    var nativeAPI = { // save native selector API
+
+    var $realInputProxy = $('#' + this.markerClassName + '-impersonated-input');
+
+    var validationAPI = {
+        htmlAttrs:  ["type", "pattern", "maxlength", "min", "max"],
+        htmlProps: ["required", "novalidate", "formnovalidate"],
+        oAttrs: ["validationMessage", "willValidate", "validity"],
+        fns: ["checkValidity", "setCustomValidity"]
+    };
+
+    var selectorAPI = { // save native selector API
         querySelector: document.querySelector,
         querySelectorAll: document.querySelectorAll,
         matches: document.documentElement.matches,
@@ -47,12 +61,13 @@
 
     function FakeInput() {
         this.defaults = {
-            rightEdgeAdjustment: 4, /* number of pixels to subtract from right edge of the fake input  */
-            leftEdgeAdjustment: 1,  /* number of pixels to add from left edge of the fake input */
-            caretAdjustment: 1,     /* number of pixels to subtract from the x coordinates of the fake caret */
-            fireInput: true,        /* wether the "input" event should be fired */
-            fireChange: true,       /* wether the "change" event should be fired */
-            overrideSelectors: true /* wether to override the selector API to impersonate input tag in a selector */
+            rightEdgeAdjustment: 4,    /* number of pixels to subtract from right edge of the fake input  */
+            leftEdgeAdjustment: 1,     /* number of pixels to add from left edge of the fake input */
+            caretAdjustment: 1,        /* number of pixels to subtract from the x coordinates of the fake caret */
+            fireInput: true,           /* wether the "input" event should be fired */
+            fireChange: true,          /* wether the "change" event should be fired */
+            integrateSelectors: true,  /* wether to override the selector API to impersonate input tag in a selector */
+            integrateValidations: true /* wether to override the validation API  */
         };
     }
 
@@ -99,15 +114,16 @@
                 options: $.extend({}, this.defaults),
             };
 
-            if ($target.is("input[type='text']")) { // if an input text is specified, replace it
-
-                // here we want to scavenge all attributes/properties assigned inline on the input
-                // as input is a children-less element, using outerHTML fits the need.
-                // Note: this is does not preserve attached event handlers! there is no way to find them out in pure javascript!
-                // Also jquery remove jquery event handlers + data when replacing.
-                $target = $(target.outerHTML.replace("input", "span")).replaceAll($target); // replaceAll returns the new object, whereas replaceWith the old one!
-                // target.removeAttr("type"); // remove type='text'
+            if ($target.is("textarea") || ($target.is("input") && !$target.is("[type='text']"))) {
+                console.warn("WARNING: you decided to override an input that is not of type 'text'");
             }
+
+            // We transform the target with into our fake input, scavanging all attributes/properties currently assigned inline on the element
+            // (whatever the type of the element).
+            // Note: this is does not preserve attached event handlers! there is no way to find them in pure javascript!
+            // Also jquery remove jquery event handlers + data when replacing.
+            $target = $(target.outerHTML.replace(target.tagName.toLowerCase(), "span")).replaceAll($target); // replaceAll returns the new object, whereas replaceWith the old one!
+            $target.empty(); // remove all children in case the element had children
 
             $target.data(this.propertyName, inst)
                 .attr("tabindex", "1") // make it focusable/tabbable
@@ -120,9 +136,19 @@
             this._impersonateInputAttributes($target);
             this._initEvents($target);
 
-            // check the overrideSelectors in the defaults options only, it's a non-sense to use this option per-widget
-            if (this.defaults.overrideSelectors === true) {
+            // check the integrateSelectors in the defaults options only, for now we consider it a non-sense to use this option per-widget
+            if (this.defaults.integrateSelectors === true) {
+                $target.attr("type", "text"); // force type text
                 this._impersonateInputSelectors($target);
+            }
+            if (this.defaults.integrateValidations === true) {
+                this._impersonateValidations($target);
+                // setup the validity classes right away
+                if (target.validity.valid === true) {
+                    $target.addClass(this.markerClassName + "-valid");
+                } else {
+                    $target.addClass(this.markerClassName + "-invalid");
+                }
             }
 
             this._optionPlugin($target, options);
@@ -190,30 +216,28 @@
          * @private
          */
         _impersonateInputStyle: function ($target) {
-            var $realInput = $('#' + this.markerClassName + '-impersonated-input'),
-                stylesToRestore = {},
-                computedInputStyle = {},
-                realInputStyle = null
+            var stylesToRestore = {},
+                realInputProxyStyle = null
             ;
 
-            if (!$realInput.length) {
+            if (!$realInputProxy.length) {
                 // insert a real input in the page so we can retrieve all its calculated styles
-                $realInput = $("<input type='text' id='" + this.markerClassName + "-impersonated-input'>");
-                stylesToRestore = StyleHelper.makeInert($realInput[0]);
-                $("body").append($realInput);
+                $realInputProxy = $("<input type='text' id='" + this.markerClassName + "-impersonated-input'>");
+                stylesToRestore = StyleHelper.makeInert($realInputProxy[0]);
+                $("body").append($realInputProxy);
 
                 // Save a new CSS class rule based on the calculated style.
                 // This is convenient instead of inline styling because:
                 //  - we can simply toggle the class on future fake inputs
                 //  - it keeps the code DRY as the styles are not repeated inline
                 //  - it doesn't bloat the DOM inspector with very long lines of inline styles
-                realInputStyle = StyleHelper.addCSSRule('.' + this.markerClassName + '{' +
-                    StyleHelper.getComputedStyleCssText($realInput[0]) +
+                realInputProxyStyle = StyleHelper.addCSSRule('.' + this.markerClassName + '{' +
+                    StyleHelper.getComputedStyleCssText($realInputProxy[0]) +
                 '}');
 
                 for (var prop in stylesToRestore) { // override styles
                     if (stylesToRestore.hasOwnProperty(prop)) {
-                        realInputStyle[prop] = stylesToRestore[prop];
+                        realInputProxyStyle[prop] = stylesToRestore[prop];
                     }
                 }
             }
@@ -475,8 +499,8 @@
 
             this._shiftTextNodeRight($target, deletedTextWidth);
 
-            if (target.value !== value && this._optionPlugin(target, "fireInput") === true) {
-                this._fireInputEvent($target);
+            if (target.value !== value) {
+                this._handleValueChanged($target);
             }
         },
 
@@ -618,8 +642,31 @@
             //
             this._adjustTextNodePosition($target);
 
-            if (target.value !== value && this._optionPlugin(target, "fireInput") === true) {
+            if (target.value !== value) {
+                this._handleValueChanged($target);
+            }
+        },
+
+
+        /**
+         * When the fake input value changes, we can perform some synchronous operations like triggering the "input" event
+         * or marking/unmarking the input as valid or invalid
+         * @param $target - the fake jquery input
+         * @private
+         */
+        _handleValueChanged: function ($target) {
+            var target = $target[0],
+                isValid
+            ;
+
+            if (this._optionPlugin(target, "fireInput") === true) {
                 this._fireInputEvent($target);
+                $target._hasChanged = true; // mark as changed to enable change event triggering
+            }
+            if (this._optionPlugin(target, "integrateValidations") === true) {
+                isValid = target.checkValidity();
+                $target.toggleClass(this.markerClassName + "-invalid", isValid)
+                    .toggleClass(this.markerClassName + "-valid", !isValid);
             }
         },
 
@@ -792,9 +839,12 @@
             });
 
             // triggered manually when fake input value is changed
-            target.addEventListener("input", function (e) {
-                $target._hasChanged = true; // mark as changed to enable change event triggering
-                console.log("input");
+            target.addEventListener("input", function () {
+                console.log("input"); // debug
+            });
+
+            target.addEventListener("invalid", function () {
+                console.log("invalid"); // debug
             });
         },
 
@@ -813,7 +863,7 @@
          * @returns {*} the result of the native call
          * @private
          */
-        _query: function (fnName, selector) {
+        _querySelector: function (fnName, selector) {
             var match,
                 selector = selector,
 
@@ -821,29 +871,36 @@
                 // we execute a dummy replace with the plugin class name and catch the error thrown
                 // if this switch formed a invalid selector (for instance if the word "plugin" is not a tag name
                 // in the selector but part of something else like .input, #input, .myinputName, etc.)
-                modifiedSelector = selector.replace("input", "." + plugin.markerClassName)
+                //
+                // Note validation API selectors: it exists other selectors like :in-range or :out-of-range related to the validation
+                // when attributes min & max are provided on an input of type number. But as we only handle type='text', those
+                // should not be treated.
+                modifiedSelector = selector.replace(/input|:invalid|:valid|:required/g, function (match) {
+                    if (match === "input") {
+                        return "." + plugin.markerClassName;
+                    }
+
+                    // return the class postfixed with the validation pseudo-class (without the ':') => -invalid, -valid or -required
+                    // Note: this is of no consequences if the user set the option integrateValidations to false.
+                    return "." + plugin.markerClassName + "-" + match.substring(1);
+                });
             ;
-
-            nativeAPI[fnName]._nonNativeExpando = true; // mark as initialized
-
-            // if (/:invalid|:valid|:required/g.test(selector))
 
             try {
                 if (modifiedSelector !== selector) {
-                    match = nativeAPI[fnName].call(this, modifiedSelector + ", " + selector);
+                    match = selectorAPI[fnName].call(this, modifiedSelector + ", " + selector);
                     if (match !== null) {
-                        match = match.length ? match : [match]; // array-like if jquery or array if native
-                        for(var i = 0; i < match.length; i++) {
-                            if (this._optionPlugin($(match[i]), "overrideSelector") === true) {
-
-                            }
-                        }
                         return match;
                     }
                 }
             } catch(e) {};
 
-            return nativeAPI[fnName].call(this, selector);
+            return selectorAPI[fnName].call(this, selector);
+        },
+
+
+        _getValidationPseudoClasses: function (pseudoClass) {
+            return '.' + this.markerClassName + '-' + pseudoClass.substring(1);
         },
 
 
@@ -856,22 +913,22 @@
                 jqFnNames = ["is", "find", "filter", "not"]
             ;
 
-            if (document.querySelector._nonNativeExpando === true) { // already initialized
+            if (selectorAPI["querySelector"]._nonNativeExpando === true) { // already initialized
                 return;
             }
 
             // Oddly, browsers don't allow overriding native document properties by direct affectation
-            // (though ok in the debug console), but it works if redefine its properties directly
+            // (though ok in the debug console), but it works if we redefine its properties directly
             // (any documentation on the logic behind this behaviour ? haven't found yet)
             Object.defineProperties(document, {
                 querySelector: {
                     get: function () {
-                        return plugin._query.bind(document, "querySelector");
+                        return plugin._querySelector.bind(document, "querySelector");
                     }
                 },
                 querySelectorAll: {
                     get: function () {
-                        return plugin._query.bind(document, "querySelectorAll");
+                        return plugin._querySelector.bind(document, "querySelectorAll");
                     }
                 }
             });
@@ -884,7 +941,7 @@
                 // So we also need to capture the context of the current call.
                 get: function () {
                     return function (selector) {
-                        return plugin._query.call(this, "matches", selector);
+                        return plugin._querySelector.call(this, "matches", selector);
                     };
                 }
             });
@@ -899,9 +956,11 @@
                 // meaning the context changes between $.fn and document.
                 // So we also need to capture the context of the current call.
                 $.fn[name] = function (selector) {
-                    return plugin._query.call(this, "jq" + capitalized, selector);
+                    return plugin._querySelector.call(this, "jq" + capitalized, selector);
                 };
             });
+
+            selectorAPI["querySelector"]._nonNativeExpando = true; // mark as initialized
         },
 
 
@@ -913,6 +972,212 @@
         //////////////////////////////////////////////////////////////////////////////////
 
 
+        /**
+         * Impersonate the validation API on the fake input and the parent form.
+         * WARNING: the parent form is a accessed via a closure and is not marked with a plugin marker class name.
+         * If the client code move the fake input around into a new form, the new form will not be impersonated.
+         * If the parent form is replaced or removed, the closured form element will not be garbage-collected.
+         * If the novalidate attribute of the form is changed by the client code, our custom form validation will fail
+         * etc...
+         *
+         * @param $target - the fake input node
+         * @private
+         */
+        _impersonateValidations: function ($target) {
+            var target = $target[0],
+                $parentForm = $target.closest("form") || {},
+                parentForm = $parentForm[0] || {}
+            ;
+
+            // Impersonate native validation API properties
+            Object.defineProperties(target, {
+                validationMessage: {
+                    get: function () {
+                        return plugin._queryValidation($target, $realInputProxy, "validationMessage");
+                    }
+                },
+                validity: {
+                    get: function () {
+                        return plugin._queryValidation($target, $realInputProxy, "validity");
+                    }
+                },
+                willValidate: {
+                    get: function () {
+                        return plugin._queryValidation($target, $realInputProxy, "willValidate");
+                    }
+                },
+            });
+
+
+            // implement checkValidity
+            target.checkValidity = function () {
+                var invalidEvent,
+                    isValid = plugin._queryValidation.call(null, $target, $realInputProxy, "checkValidity");
+
+                if (!isValid) {
+                    plugin._fireInvalidEvent($target);
+                }
+            };
+
+            // implement setCustomValidity
+            target.setCustomValidity = function (message) {
+                plugin._queryValidation.call(null, $target, $realInputProxy, "setCustomValidity", message);
+
+                if (message.length) {
+                    $target.removeClass(plugin.markerClassName + "-valid")
+                        .addClass(plugin.markerClassName + "-invalid");
+                } else {
+                    $target.removeClass(plugin.markerClassName + "-invalid")
+                        .addClass(plugin.markerClassName + "-valid");
+                }
+            };
+
+
+            if (parentForm._nonNativeExpando === true) { // already initialized
+                return;
+            }
+
+            // we don't want to let the browser check the form validity when the user clicks on a submit button
+            // as we have to perform our custom validation.
+            // So we save the currently set novalidate boolean reflected attribute and override it to "true".
+            // Caveat of this method: the browser will not display its inline bubbles
+            $parentForm._noValidate = parentForm.novalidate === true;
+            parentForm.novalidate = true;
+
+            // override checkValidity on the form (note: Contrary to 'document' native functions, we can override element attributes with direct affectation)
+            // form checkValidity, simply loop over all inputs (fake or not).
+            // Also supports the "form" attribute on input elements that allow to attach an external input to a specified form.
+            parentForm.checkValidity = function () {
+                var isValid = true;
+
+                $parentForm.find("input").add($("[form=" + parentForm.id + "]")).each(function (index, elt) {
+                    isValid = isValid && elt.checkValidity(); // either our fake input or a native one if mix
+                    return isValid; // if false, this breaks the jQuery loop
+                });
+
+                if (!isValid) {
+                    plugin._fireInvalidEvent($parentForm);
+                }
+
+                return isValid;
+            };
+
+
+            // perform the validation ourselves if the form should be validated
+            $parentForm.on("submit", function () {
+                if ($parentForm._noValidate === false) { // if the form was meant to be validated
+                    // calls our impersonated checkValidity
+                    return this.checkValidity(); // <=> prevent default + stop bubbling
+                }
+            });
+
+            // support for formnovalidate attribute on submit inputs/buttons that can forbid
+            // a form from triggering validation even if its novalidate attribute was not set
+            $parentForm.find("[type=submit]").on("click", function () {
+                $parentForm._noValidate = $parentForm._noValidate && this.formnovalidate === true;
+            });
+
+            parentForm._nonNativeExpando = true; // mark as already initialized
+        },
+
+
+        /**
+         * Fire the invalid event. This normally happens when:
+         *   - checkValidity is called manually on an input or form element
+         *   - the form is submitted
+         * @param $target
+         * @private
+         */
+        _fireInvalidEvent: function ($target) {
+            var invalidEvent = new Event("invalid", {
+                bubbles: false,
+                cancelable: true
+            });
+            $target[0].dispatchEvent(invalidEvent);
+        },
+
+
+        /**
+         * To avoid reimplementing the native validation API in plain javascript, the trick is to use
+         * our real inert input to perform the validation given our current fake node state (attributes & values).
+         * To detect if the property is an attribute or a property, we make use of our predefined object validationAPI that keeps
+         * track of the types and names of various properties.
+         *
+         * @param $target - the fake jQuery input node
+         * @param $input - a real input text
+         * @private
+         */
+        _impersonateHtmlValidation: function ($target, $input) {
+            var target = $target[0];
+
+            validationAPI.htmlAttrs.forEach(function (attr) {
+                if (target.hasAttribute(attr)) {
+                    $input.attr(attr, $target.attr(attr));
+                }
+            });
+
+            validationAPI.htmlProps.forEach(function (prop) {
+                if (target.hasAttribute(prop)) {
+                    $input.prop(prop, true);
+                }
+            });
+
+            $input.val($target.val());
+        },
+
+
+        /**
+         * Clear the data (attributes & values) set on our real input from a call to _impersonateHtmlValidation
+         *
+         * @param $target - the fake jQuery input node
+         * @param $input - a real input text
+         * @private
+         */
+        _clearHtmlValidation: function ($target, $input) {
+            validationAPI.htmlAttrs.forEach(function (attr) {
+                $input.removeAttr(attr);
+            });
+            validationAPI.htmlProps.forEach(function (prop) {
+                $input.prop(prop, false); // do not use removeProp as once a native prop is removed it cannot be added again
+            });
+
+            $input.val('');
+        },
+
+
+        /**
+         * Retrieve the validation API property on a real input. The property can be either a simple attribute or a function to call.
+         * To detect if the property is a function call or an attribute, we make use of our predefined object validationAPI that keeps
+         * track of the types and names of various properties.
+         *
+         * @param {jQuery} $target - the fake jquery input
+         * @param {String} name - the name of the validation property to retrieve
+         * @returns {*} the retrieved property
+         * @private
+         */
+        _queryValidation: function ($target, $input, name) {
+            var ret,
+                args,
+                input = $input[0]
+            ;
+
+            plugin._impersonateHtmlValidation($target, $input);
+
+            if (validationAPI.fns.indexOf(name) !== -1) { // the property is a function
+                args = Array.prototype.slice.call(arguments);
+                ret = input[name].apply(input, args.slice(3));
+            } else if (validationAPI.oAttrs.indexOf(name) !== -1) { // the property is an attribute
+                ret = input[name];
+            } else {
+                throw new TypeError("invalid argument: " + name);
+            }
+
+            ret = typeof ret === "object" ? $.extend({}, ret) : ret; // copy object as clearing the input may change its values
+
+            plugin._clearHtmlValidation($target, $input);
+
+            return ret;
+        },
 
 
 
