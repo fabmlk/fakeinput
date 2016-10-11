@@ -18,6 +18,7 @@
  * - selectionchange event (not yet supported by browsers)
  * - impersonation of CSS styles related to validation pseudo-classes (:invalid, :valid, :required...)
  * - impersonation of DOM Level 2 methods of element retreival (getElementById, getElementsByTagName, ....)
+ * - inheritance of the fake input color style by the caret (at least chrome does this)
  */
 
 (function (factory) {
@@ -25,16 +26,18 @@
         // AMD. Register as an anonymous module.
         define([
             "jquery",
-            "stylehelper"
+            "stylehelper.js"
         ], factory);
     } else if (typeof module === 'object' && module.exports) {
         // Node/CommonJS
-        module.exports = factory(require("jquery"), require("stylehelper"));
+        module.exports = factory(require("jquery"), require("stylehelper.js"));
     } else {
         // Browser globals
         factory(jQuery, StyleHelper);
     }
 }(function ($, StyleHelper) {
+
+    var getters = []; // list of getter methods (none for the moment)
 
     var $fakeCaret = $(); // only one caret instance for everyone
 
@@ -159,14 +162,17 @@
 
             target = $target[0];
 
-            $target.data(this.propertyName, inst)
-                .attr("tabindex", "1") // make it focusable/tabbable
+            $target.data(this.propertyName, inst);
+
+            this._impersonateInputStyle($target); // do this before adding child textnode!
+
+            $target.attr("tabindex", "1") // make it focusable/tabbable
                 .html("<span class='" + this.markerClassName + "-textnode'>" + currentValue + "</span>"); // fake text node
 
             $target._hasChanged = false; // we will use this to trigger change event if needed
 
             this._setCaretPlugin();
-            this._impersonateInputStyle($target);
+
             this._impersonateInputAttributes($target);
             this._initEvents($target);
 
@@ -247,38 +253,63 @@
 
 
         /**
-         * Impersonate the styles of a real input text in the context of the current page.
+         * Impersonate the styles of a real input text in the context of its parent.
          *
          * @param {jQuery} $target - the fake jquery input
          * @private
          */
         _impersonateInputStyle: function ($target) {
-            var stylesToRestore = {},
-                realInputProxyStyle = null
+            var stylesToRestore,
+                target = $target[0],
+                $doppleganger,
+                doppleganger,
+                dopplegangerStyle,
+                markerClassDoppleganger = this.markerClassName + "-doppleganger",
+                // do not user selector API as we already filter it from the result set!
+                $previousDoppleGanger = $(document.getElementsByClassName(markerClassDoppleganger)),
+                // this counter allows us to create a unique css rule each time
+                styleIncr = $previousDoppleGanger.length ? $previousDoppleGanger.data("incr") : 0
             ;
 
-            if (!$realInputProxy.length) {
-                // insert a real input in the page so we can retrieve all its calculated styles
-                $realInputProxy = $("<input type='text' id='" + this.markerClassName + "-impersonated-input'>");
-                stylesToRestore = StyleHelper.makeInert($realInputProxy[0]);
-                $("body").append($realInputProxy);
+            if ($previousDoppleGanger.parent()[0] === $target.parent()[0]) { // same style already defined
+                $target.addClass(this.markerClassName + ' ' + this.markerClassName + '-' + styleIncr);
+                return;
+            }
 
-                // Save a new CSS class rule based on the calculated style.
-                // This is convenient instead of inline styling because:
-                //  - we can simply toggle the class on future fake inputs
-                //  - it keeps the code DRY as the styles are not repeated inline
-                //  - it doesn't bloat the DOM inspector with very long lines of inline styles
-                realInputProxyStyle = StyleHelper.addCSSRule('.' + this.markerClassName,
-                    StyleHelper.getComputedStyleCssText($realInputProxy[0]));
+            styleIncr++;
 
-                for (var prop in stylesToRestore) { // override styles
-                    if (stylesToRestore.hasOwnProperty(prop)) {
-                        realInputProxyStyle[prop] = stylesToRestore[prop];
-                    }
+            $previousDoppleGanger.remove(); // we will create a new one so this one won't be needed anymore
+
+            // create a real input doppleganger from the target
+            // (Note: this is redundant if the target was already an input)
+            $doppleganger = $(target.outerHTML.replace(target.tagName.toLowerCase(), "input"))
+                .removeAttr("id")
+                .addClass(markerClassDoppleganger);
+
+            doppleganger = $doppleganger[0];
+
+            $doppleganger.data("incr", styleIncr); // save current incrementation
+            $realInputProxy = $doppleganger; // whenever a real input proxy will be needed for validation, we can use this one
+
+            // insert a real input in the page so we can retrieve all its calculated styles
+            stylesToRestore = StyleHelper.makeInert(doppleganger);
+            $target.after($doppleganger);
+
+            // Save a new CSS class rule based on the calculated style.
+            // This is convenient instead of inline styling because:
+            //  - we can simply toggle the class on future fake inputs
+            //  - it keeps the code DRY as the styles are not repeated inline
+            //  - it doesn't bloat the DOM inspector with very long lines of inline styles
+            dopplegangerStyle = StyleHelper.addCSSRule('.' + this.markerClassName + '-' + styleIncr,
+                StyleHelper.getComputedStyleCssText(doppleganger));
+
+            for (var prop in stylesToRestore) { // override styles
+                if (stylesToRestore.hasOwnProperty(prop)) {
+                    dopplegangerStyle[prop] = stylesToRestore[prop];
                 }
             }
 
-            $target.addClass(this.markerClassName);
+            $target.addClass(this.markerClassName + ' ' + this.markerClassName + '-' + styleIncr);
         },
 
 
@@ -299,7 +330,11 @@
                     return $fakeTextNode.text();
                 },
                 set: function (val) {
+                    var currentVal = $fakeTextNode.text();
                     $fakeTextNode.text(val);
+                    if (val != currentVal) {
+                        plugin._handleValueChanged($target);
+                    }
                 }
             });
 
@@ -534,10 +569,6 @@
             }
 
             this._shiftTextNodeRight($target, deletedTextWidth);
-
-            if (target.value !== value) {
-                this._handleValueChanged($target);
-            }
         },
 
 
@@ -656,7 +687,7 @@
 
             value = target.value; // current value (after deleted selection if condition was true above)
 
-            if (value.length >= ($target.attr("maxlength") || -1)) {
+            if (value.length >= ($target.attr("maxlength") || Infinity)) {
                 return;
             }
 
@@ -681,10 +712,6 @@
             // See _shiftTextNodeLeft in old commit: 5b0d1e7884a6cac11be92e4b6a74edd917991f53
             //
             this._adjustTextNodePosition($target);
-
-            if (target.value !== value) {
-                this._handleValueChanged($target);
-            }
         },
 
 
@@ -918,7 +945,8 @@
                 if (modifiedSelector !== selector) {
                     match = selectorAPI[extensionName][fnName].call(this, modifiedSelector + ", " + selector);
                     if (match !== null) {
-                        return match;
+                        // remove our dopplegangers before returning the result
+                        return selectorAPI.jquery.not.call($(match), '.inert');
                     }
                 }
             } catch(e) {};
@@ -1310,8 +1338,28 @@
     var plugin = $.fakeinput = new FakeInput();
 
 
+    /**
+     * Boilerplate jquery plugin code: Determine whether a method is a getter and doesn't permit chaining.
+     * @param method {String} (Optional) the method to run
+     * @param otherArgs {Array} (Optional) any other arguments for the method
+     * @returns {boolean} true if the method is a getter, false if not
+     */
+    function isNotChained (method, otherArgs) {
+        if (method === 'option' && (otherArgs.length == 0 ||
+            (otherArgs.length === 1 && typeof otherArgs[0] === 'string'))) {
+            return true;
+        }
+        return $.inArray(method, getters) > -1;
+    }
+
+
     $.fn.fakeinput = function (options) {
         var otherArgs = Array.prototype.slice.call(arguments, 1);
+
+        if (isNotChained(options, otherArgs)) { // if the method is a getter, returns method's value directly
+            return plugin['_' + options + 'Plugin'].apply(plugin, [this[0]].concat(otherArgs));
+        }
+
         return this.each(function () {
             if (typeof options == 'string') {
                 if (!plugin['_' + options + 'Plugin']) {
