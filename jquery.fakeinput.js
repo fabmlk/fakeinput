@@ -13,6 +13,7 @@
  * - moving a selection around via click + dragging
  * - creating selection from keyboard: shift+arrow key or Ctrl+A
  * - navigating to the start or end of the input via Home and End keys
+ * - copy-pasting via Ctrl+C Ctrl+V (context menu is only available on real inputs)
  * - outline styling on focus
  * - selectionchange event (not yet supported by browsers)
  * - impersonation of CSS styles related to validation pseudo-classes (:invalid, :valid, :required...)
@@ -59,6 +60,11 @@
         jqIs: $.fn.is
     };
 
+    var fakeTextNodeListenedEvents = ["mousedown", "click", "mouseup", "dblclick", "mousemove", "mouseover", "mouseout",
+    "mousewheel", "touchstart", "touchend", "touchcancel"];
+
+    var fakeInputListenedEvents = ["mousedown", "blur", "focus", "keypress", "keydown"];
+
     function FakeInput() {
         this.defaults = {
             rightEdgeAdjustment: 4,    /* number of pixels to subtract from right edge of the fake input  */
@@ -103,27 +109,27 @@
         _attachPlugin: function (target, options) {
             var inst,
                 $target = $(target),
-                currentValue = currentValue = $target.prop("value") || $target.attr("value") || ""
+                currentValue = $target.prop("value") || $target.attr("value") || ""
             ;
 
-            if ($target.hasClass(this.markerClassName)) {
+            if ($target.hasClass(this.markerClassName)) { // already attached
                 return;
             }
 
             inst = {
                 options: $.extend({}, this.defaults),
+                originalElement: target
             };
 
-            if ($target.is("textarea") || ($target.is("input") && !$target.is("[type='text']"))) {
-                console.warn("WARNING: you decided to override an input that is not of type 'text'");
-            }
-
-            // We transform the target with into our fake input, scavanging all attributes/properties currently assigned inline on the element
-            // (whatever the type of the element).
+            // We turn the target into our fake input, inheriting all attributes/properties currently assigned inline on
+            // the element(whatever the type of the element).
             // Note: this is does not preserve attached event handlers! there is no way to find them in pure javascript!
             // Also jquery remove jquery event handlers + data when replacing.
             $target = $(target.outerHTML.replace(target.tagName.toLowerCase(), "span")).replaceAll($target); // replaceAll returns the new object, whereas replaceWith the old one!
+
             $target.empty(); // remove all children in case the element had children
+
+            target = $target[0];
 
             $target.data(this.propertyName, inst)
                 .attr("tabindex", "1") // make it focusable/tabbable
@@ -136,36 +142,22 @@
             this._impersonateInputAttributes($target);
             this._initEvents($target);
 
-            // check the integrateSelectors in the defaults options only, for now we consider it a non-sense to use this option per-widget
-            if (this.defaults.integrateSelectors === true) {
-                $target.attr("type", "text"); // force type text
-                this._impersonateInputSelectors($target);
-            }
-            if (this.defaults.integrateValidations === true) {
-                this._impersonateValidations($target);
-                // setup the validity classes right away
-                if (target.validity.valid === true) {
-                    $target.addClass(this.markerClassName + "-valid");
-                } else {
-                    $target.addClass(this.markerClassName + "-invalid");
-                }
-            }
-
-            this._optionPlugin($target, options);
+            this._optionPlugin(target, options);
         },
 
 
         /**
          * Public jQuery plugin method to get/set one or multiple plugin options following jQuery plugin guidelines.
-         * @param target - the fake jquery input
+         * @param target - the fake input node
          * @param {Object|String} options - (Optional) the option(s) to get or set
          * @param {*} value - (Optional) the value to set for the option
          * @private
          */
         _optionPlugin: function (target, options, value) {
             /* start of boilerplate code common to most jquery plugins */
-            $target = $(target);
-            var inst = $target.data(this.propertyName); // retrieve current instance settings
+            var $target = $(target),
+                inst = $target.data(this.propertyName) // retrieve current instance settings
+            ;
 
             if (!options || (typeof options == 'string' && value == null)) {
                 // Get option
@@ -186,11 +178,27 @@
             }
             $.extend(inst.options, options); // update with new options
             /* end of boilerplate code */
+
+            if (inst.options.integrateSelectors === true) {
+                $target.attr("type", "text"); // force type text
+                this._impersonateInputSelectors($target);
+            } else {
+                $target.removeAttr("type");
+                this._stopSelectorsImpersonation($target);
+            }
+            if (inst.options.integrateValidations === true) {
+                this._impersonateValidations($target);
+
+                // setup the validity classes right away
+                this._toggleValidityClasses($target, target.validity.valid);
+            } else {
+                this._stopValidationsImpersonation($target);
+            }
         },
 
         /**
          * Set the char to use for the caret.
-         * We would almost want to have the vertical bar '|' but we could use fancier unicode chars if we wanted
+         * We would almost always want to have the vertical bar '|' but we could use fancier unicode chars if we wanted
          * (though the width of this char should fit inside 2 adjacent chars as its width is not taken into account
          * in the future calculations).
          *
@@ -231,9 +239,8 @@
                 //  - we can simply toggle the class on future fake inputs
                 //  - it keeps the code DRY as the styles are not repeated inline
                 //  - it doesn't bloat the DOM inspector with very long lines of inline styles
-                realInputProxyStyle = StyleHelper.addCSSRule('.' + this.markerClassName + '{' +
-                    StyleHelper.getComputedStyleCssText($realInputProxy[0]) +
-                '}');
+                realInputProxyStyle = StyleHelper.addCSSRule('.' + this.markerClassName,
+                    StyleHelper.getComputedStyleCssText($realInputProxy[0]));
 
                 for (var prop in stylesToRestore) { // override styles
                     if (stylesToRestore.hasOwnProperty(prop)) {
@@ -664,9 +671,7 @@
                 $target._hasChanged = true; // mark as changed to enable change event triggering
             }
             if (this._optionPlugin(target, "integrateValidations") === true) {
-                isValid = target.checkValidity();
-                $target.toggleClass(this.markerClassName + "-invalid", isValid)
-                    .toggleClass(this.markerClassName + "-valid", !isValid);
+                this._toggleValidityClasses($target, target.checkValidity());
             }
         },
 
@@ -728,20 +733,10 @@
             // As the "target" attribute is readonly and cannot ever be set/changed, the trick is to
             // listen for the event directly on the fake inner text node, stop its propagation
             // immediately, and trigger a newly created matching event on the fake input.
-            fakeTextNode.addEventListener("mousedown", plugin._impersonateTouchMouseEvent.bind(fakeTextNode, target));
-            fakeTextNode.addEventListener("click", plugin._impersonateTouchMouseEvent.bind(fakeTextNode, target));
-            fakeTextNode.addEventListener("mouseup", plugin._impersonateTouchMouseEvent.bind(fakeTextNode, target));
-            fakeTextNode.addEventListener("dblclik", plugin._impersonateTouchMouseEvent.bind(fakeTextNode, target));
-            fakeTextNode.addEventListener("mousemove", plugin._impersonateTouchMouseEvent.bind(fakeTextNode, target));
-            fakeTextNode.addEventListener("mouseover", plugin._impersonateTouchMouseEvent.bind(fakeTextNode, target));
-            fakeTextNode.addEventListener("mouseout", plugin._impersonateTouchMouseEvent.bind(fakeTextNode, target));
-            fakeTextNode.addEventListener("mousewheel", plugin._impersonateTouchMouseEvent.bind(fakeTextNode, target));
 
-            fakeTextNode.addEventListener("touchstart", plugin._impersonateTouchMouseEvent.bind(fakeTextNode, target));
-            fakeTextNode.addEventListener("touchend", plugin._impersonateTouchMouseEvent.bind(fakeTextNode, target));
-            fakeTextNode.addEventListener("touchcancel", plugin._impersonateTouchMouseEvent.bind(fakeTextNode, target));
-            fakeTextNode.addEventListener("touchmove", plugin._impersonateTouchMouseEvent.bind(fakeTextNode, target));
-
+            fakeTextNodeListenedEvents.forEach(function (eventName) {
+                fakeTextNode.addEventListener(eventName, plugin._impersonateTouchMouseEvent.bind(fakeTextNode, target));
+            });
 
             // mousedown event on fake input will only occur from programmatically created event in the
             // fake inner text node (see above)
@@ -837,15 +832,6 @@
                     plugin._showCaret($target);
                 }
             });
-
-            // triggered manually when fake input value is changed
-            target.addEventListener("input", function () {
-                console.log("input"); // debug
-            });
-
-            target.addEventListener("invalid", function () {
-                console.log("invalid"); // debug
-            });
         },
 
 
@@ -866,6 +852,7 @@
         _querySelector: function (fnName, selector) {
             var match,
                 selector = selector,
+                markerUsesNativeSelector = plugin.markerClassName + "-uses-native-selector",
 
                 // instead of doing any kind of parsing on the selector to detect if the input tag is present
                 // we execute a dummy replace with the plugin class name and catch the error thrown
@@ -877,12 +864,12 @@
                 // should not be treated.
                 modifiedSelector = selector.replace(/input|:invalid|:valid|:required/g, function (match) {
                     if (match === "input") {
-                        return "." + plugin.markerClassName;
+                        return "." + markerUsesNativeSelector;
                     }
 
                     // return the class postfixed with the validation pseudo-class (without the ':') => -invalid, -valid or -required
                     // Note: this is of no consequences if the user set the option integrateValidations to false.
-                    return "." + plugin.markerClassName + "-" + match.substring(1);
+                    return "." + markerUsesNativeSelector + "." + plugin.markerClassName + "-" + match.substring(1);
                 });
             ;
 
@@ -898,22 +885,19 @@
             return selectorAPI[fnName].call(this, selector);
         },
 
-
-        _getValidationPseudoClasses: function (pseudoClass) {
-            return '.' + this.markerClassName + '-' + pseudoClass.substring(1);
-        },
-
-
         /**
          * Overrides the selector API to match the fake inputs when the input tag is present in a selector.
          * @private
          */
         _impersonateInputSelectors: function ($target) {
             var target = $target[0],
-                jqFnNames = ["is", "find", "filter", "not"]
+                jqFnNames = ["is", "find", "filter", "not"],
+                markerUsesNativeSelector = this.markerClassName + "-uses-native-selector"
             ;
 
-            if (selectorAPI["querySelector"]._nonNativeExpando === true) { // already initialized
+            $target.addClass(markerUsesNativeSelector);
+
+            if (selectorAPI.initialized === true) { // already initialized
                 return;
             }
 
@@ -938,7 +922,7 @@
                 //      elem.matches(selector);
                 //  But this is actually equivalent to:
                 //      document.documentElement.matches.call(elm, selector);
-                // So we also need to capture the context of the current call.
+                // So we van use this form but need to capture the context of the current call.
                 get: function () {
                     return function (selector) {
                         return plugin._querySelector.call(this, "matches", selector);
@@ -953,14 +937,25 @@
                 var capitalized = name[0].toUpperCase() + name.substring(1);
 
                 // Those jquery selector functions are also called from inside jQuery code,
-                // meaning the context changes between $.fn and document.
+                // meaning the context can change between $.fn and window.
                 // So we also need to capture the context of the current call.
                 $.fn[name] = function (selector) {
                     return plugin._querySelector.call(this, "jq" + capitalized, selector);
                 };
             });
 
-            selectorAPI["querySelector"]._nonNativeExpando = true; // mark as initialized
+            selectorAPI.initialized = true; // mark as already initialized
+        },
+
+        /**
+         * Stop the impersonation of native selectors. The fake input will no longer appear
+         * in input selectors;
+         *
+         * @param $target - the fake jquery input
+         * @private
+         */
+        _stopSelectorsImpersonation: function ($target) {
+            $target.removeClass(this.markerClassName + "-uses-native-selector");
         },
 
 
@@ -986,7 +981,8 @@
         _impersonateValidations: function ($target) {
             var target = $target[0],
                 $parentForm = $target.closest("form") || {},
-                parentForm = $parentForm[0] || {}
+                parentForm = $parentForm[0] || {},
+                markerUsesValidation = this.markerClassName + "-uses-validation"
             ;
 
             // Impersonate native validation API properties
@@ -1005,7 +1001,7 @@
                     get: function () {
                         return plugin._queryValidation($target, $realInputProxy, "willValidate");
                     }
-                },
+                }
             });
 
 
@@ -1017,23 +1013,21 @@
                 if (!isValid) {
                     plugin._fireInvalidEvent($target);
                 }
+
+                return isValid;
             };
 
             // implement setCustomValidity
             target.setCustomValidity = function (message) {
+                var hasMessage = message.length;
+
                 plugin._queryValidation.call(null, $target, $realInputProxy, "setCustomValidity", message);
 
-                if (message.length) {
-                    $target.removeClass(plugin.markerClassName + "-valid")
-                        .addClass(plugin.markerClassName + "-invalid");
-                } else {
-                    $target.removeClass(plugin.markerClassName + "-invalid")
-                        .addClass(plugin.markerClassName + "-valid");
-                }
+                plugin._toggleValidityClasses(message.length === 0);
             };
 
 
-            if (parentForm._nonNativeExpando === true) { // already initialized
+            if ($parentForm.hasClass(markerUsesValidation)) { // already initialized
                 return;
             }
 
@@ -1077,7 +1071,7 @@
                 $parentForm._noValidate = $parentForm._noValidate && this.formnovalidate === true;
             });
 
-            parentForm._nonNativeExpando = true; // mark as already initialized
+            $parentForm.addClass(markerUsesValidation); // mark as already initialized
         },
 
 
@@ -1161,6 +1155,8 @@
                 input = $input[0]
             ;
 
+            plugin._clearHtmlValidation($target, $input);
+
             plugin._impersonateHtmlValidation($target, $input);
 
             if (validationAPI.fns.indexOf(name) !== -1) { // the property is a function
@@ -1172,15 +1168,70 @@
                 throw new TypeError("invalid argument: " + name);
             }
 
-            ret = typeof ret === "object" ? $.extend({}, ret) : ret; // copy object as clearing the input may change its values
-
-            plugin._clearHtmlValidation($target, $input);
-
             return ret;
         },
 
+        /**
+         * Toggle -invalid or -valid custom classes reflecting the :invalid and :valid states of the fake input.
+         *
+         * @param $target - the fake jQuery input
+         * @param isValid - if true, toggles the valid class, else toggles the invalid class
+         * @private
+         */
+        _toggleValidityClasses: function ($target, isValid) {
+            $target.toggleClass(this.markerClassName + "-invalid", !isValid)
+                .toggleClass(this.markerClassName + "-valid", isValid);
+        },
 
 
+        _stopValidationsImpersonation: function ($target) {
+
+        },
+
+
+        _destroyPlugin: function (target) {
+            var $target = $(target),
+                fakeTextNode = $target.children()[0],
+                $parentForm = $target.closest("form"),
+                inst = $target.data(this.markerClassName)
+            ;
+
+            Object.defineProperties(document, {
+                querySelector: {
+                    get: function () {
+                        return selectorAPI.querySelector;
+                    }
+                },
+                querySelectorAll: {
+                    get: function () {
+                        return selectorAPI.querySelectorAll;
+                    }
+                }
+            });
+            Object.defineProperty(document.documentElement, "matches", {
+                get: function () {
+                    return selectorAPI.matches;
+                }
+            });
+
+            fakeTextNodeListenedEvents.forEach(function (eventName) {
+                fakeTextNode.removeEventListener(eventName);
+            });
+
+            fakeInputListenedEvents.forEach(function (eventName) {
+                target.removeEventListener(eventName);
+            });
+
+            $target.replaceWith(inst.originalEelement);
+
+            if ($parentForm.find(this.markerClassName).length === 0) {
+                $parentForm.removeClass(this.markerClassName + "-uses-validation");
+            }
+            if ($(this.markerClassName).length === 0) {
+                $fakeCaret.remove();
+                $realInputProxy.remove();
+            }
+        }
     });
 
     var plugin = $.fakeinput = new FakeInput();

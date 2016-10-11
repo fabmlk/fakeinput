@@ -112,55 +112,73 @@
          * Returns an object that contains the style defined for 'selector' in the stylesheet 'sheet'.
          * @param selector (String} the selector to retrieve the style from
          * @param sheet {Stylesheet} the stylesheet where to look for the selector
-         * @returns {Object}
+         * @returns {Object|null} the filled object if the style is retrieved, null otherwise
          */
-        getStyle: function (selector, sheet) {
+        getStyleAttributes: function (selector, sheet) {
             sheet = sheet || {};
             var styleMatchMap = {},
                 cssRules = sheet.cssRules || [],
-                cssStyleDeclaration = {},
+                cssStyleDeclaration = this.getStyleDeclaration(selector, sheet),
                 styleAttributes
             ;
 
-            for (var x = 0; x < cssRules.length; x++) {
-                if (cssRules[x].selectorText == selector) {
-                    cssStyleDeclaration = cssRules[x].style;
+            if (cssStyleDeclaration !== null) {
+                // cssStyleDeclaration is not completely enumerable in Firefox (bug?)
+                // so instead we use cssText to parse the individual attributes
+                styleAttributes = cssStyleDeclaration.cssText.split(';');
+                styleAttributes.forEach(function (styleAttribute) {
+                    var splitStyleAttribute = styleAttribute.split(':');
 
-                    // cssStyleDeclaration is not completely enumerable in Firefox (bug?)
-                    // so instead we use cssText to parse the individual attributes
-                    styleAttributes = cssStyleDeclaration.cssText.split(';');
-                    styleAttributes.forEach(function (styleAttribute) {
-                        var splitStyleAttribute = styleAttribute.split(':');
-
-                        if(splitStyleAttribute.length === 2) {
-                            styleMatchMap[splitStyleAttribute[0].trim()] = splitStyleAttribute[1].trim();
-                        }
-                    });
-
-                    break;
-                }
+                    if (splitStyleAttribute.length === 2) {
+                        styleMatchMap[splitStyleAttribute[0].trim()] = splitStyleAttribute[1].trim();
+                    }
+                });
             }
+
             return styleMatchMap;
         },
 
+        /**
+         * Get raw CSSStyleDeclaration object associated to a selector in a stylesheet.
+         * @param selector {String} the selector to retrieve
+         * @param sheet {Stylesheet} the sheet where to search the selector
+         * @returns {CSSStyleDeclaration} if the selector exists, null otherwise
+         */
+        getStyleDeclaration: function (selector, sheet) {
+            var cssRules = sheet.cssRules || [];
+
+            for (var x = 0; x < cssRules.length; x++) {
+                if (cssRules[x].selectorText == selector) {
+                    return cssRules[x].style;
+                }
+            }
+
+            return null;
+        },
 
         /**
          * Add a css rule in the specified stylesheet or "inert stylesheet" if not stylesheet provided
-         * @param {String} cssrule - the css rule to add, ex: ".foo { display: inline-block; }"
+         * @param {String} selector - the selector rule to add, ex: ".foo"
+         * @param {String} body - the body of the rule to add, ex: "margin-right: 15px; display: inline-block"
          * @param {Stylesheet} (Optional) sheet - the stylesheet where we want to add the rule, uses inert stylesheet by default
          * @returns {CSSStyleDeclaration} a reference to the style object we added
          */
-        addCSSRule: function (cssrule, sheet) {
+        addCSSRule: function (selector, body, sheet) {
+            var styleDeclaration;
+
             sheet = sheet || this.getInertSheet();
 
+            styleDeclaration = this.getStyleDeclaration(selector, sheet);
+            if (styleDeclaration !== null) { // already exists
+                return styleDeclaration;
+            }
+
             if (sheet.insertRule) {
-                sheet.insertRule(cssrule, 0); // insert first
+                sheet.insertRule(selector + '{' + body + '}', 0); // insert first
             } else { // non-standard addRule
-                var matches = /([^{]+){([^}]+)}/g.exec(cssrule);
-                var selector = matches[0].trim();
-                var body = matches[1].trim();
                 sheet.addRule(selector, body, 0);
             }
+
             return sheet.cssRules[0].style;
         },
 
@@ -172,7 +190,7 @@
          */
         makeInert: function (elt) {
             var defaults = window.getComputedStyle(elt),
-                inertStyle = this.getStyle('.inert', this.getInertSheet()),
+                inertStyle = this.getStyleAttributes('.inert', this.getInertSheet()),
                 overridenByInertStyles = {}
             ;
 
