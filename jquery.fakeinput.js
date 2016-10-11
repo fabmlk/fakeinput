@@ -127,6 +127,8 @@
 
         /**
          * Public jQuery plugin method to attach the plugin instance to an existing element.
+         * WARNING: this uses .replaceChild() internally so anything attached to the replaced element
+         * will be lost for the duration of the plugin life (restored on destroy).
          *
          * @param target - the fake jquery input
          * @param {Object|String} options - (Optional) the option(s) to get or set
@@ -653,6 +655,10 @@
             }
 
             value = target.value; // current value (after deleted selection if condition was true above)
+
+            if (value.length >= ($target.attr("maxlength") || -1)) {
+                return;
+            }
 
             target.value = value.slice(0, target.selectionStart) + newChar + value.slice(target.selectionEnd);
             target.selectionStart = target.selectionEnd = target.selectionStart + 1;
