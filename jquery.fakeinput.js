@@ -26,11 +26,11 @@
         // AMD. Register as an anonymous module.
         define([
             "jquery",
-            "stylehelper.js"
+            "./stylehelper.js"
         ], factory);
     } else if (typeof module === 'object' && module.exports) {
         // Node/CommonJS
-        module.exports = factory(require("jquery"), require("stylehelper.js"));
+        module.exports = factory(require("jquery"), require("./stylehelper.js"));
     } else {
         // Browser globals
         factory(jQuery, StyleHelper);
