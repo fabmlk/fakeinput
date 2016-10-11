@@ -291,7 +291,7 @@
             $doppleganger.data("incr", styleIncr); // save current incrementation
             $realInputProxy = $doppleganger; // whenever a real input proxy will be needed for validation, we can use this one
 
-            // insert a real input in the page so we can retrieve all its calculated styles
+            // insert a real input with the same parent so we can retrieve all its calculated styles
             stylesToRestore = StyleHelper.makeInert(doppleganger);
             $target.after($doppleganger);
 
@@ -945,8 +945,8 @@
                 if (modifiedSelector !== selector) {
                     match = selectorAPI[extensionName][fnName].call(this, modifiedSelector + ", " + selector);
                     if (match !== null) {
-                        // remove our dopplegangers before returning the result
-                        return selectorAPI.jquery.not.call($(match), '.inert');
+                        // remove .inert elements from the set
+                        return selectorAPI.jquery.jqNot.call($(match), '.inert');
                     }
                 }
             } catch(e) {};
