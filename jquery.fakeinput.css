@@ -19,16 +19,27 @@
     top: 0 !important;
     left: 0 !important;
 
+    /* By adding a right padding, we make sure the caret will be always visible even if set at the very right of the box.
+       This used to be taken into account in the JS calculations. Because of this being done in CSS, we need to also
+       add a corresponding negative margin to make sure the visible width stays accurate. (We don't want to use
+       border-box as we don't want to override the default box-sizing if was specified on the real input) */
+    padding-right: 1px !important;
+    margin-left: -1px !important;
+
     /* by default, white-space is "normal" meaning whitespaces are collapsed. We want to preserve them. */
     white-space: pre !important;
     cursor: text !important;
+
+    /* If this property was set on a real input, it will override any "color" property set on our fake input.
+       In order to be able to change the color via the "color" property, we have to explicitly inherit this property */
+    -webkit-text-fill-color: inherit !important;
 }
 
 .fab-fakeinput-textnode {
     position: absolute;
-    top: 0;
+    /*top: 0;*/
     bottom: 0;
-    right: 0;
+    right: 0; /* taking up full width is important as we use caretRangeFromPoint() */
     left: 0;
     margin: 0;
     padding: 0;
@@ -37,5 +48,20 @@
 
 .fab-fakeinput-caret {
     position: relative;
+    margin: 0;
+    padding: 0;
+    left: 0;
+    top: 0;
+    bottom: 0;
+
+    border-left-width: 1px;
+    border-left-style: solid;
+
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    pointer-events: none;
+
     animation: 1s blink infinite steps(1);
 }

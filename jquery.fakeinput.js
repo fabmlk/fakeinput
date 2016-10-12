@@ -18,7 +18,6 @@
  * - selectionchange event (not yet supported by browsers)
  * - impersonation of CSS styles related to validation pseudo-classes (:invalid, :valid, :required...)
  * - impersonation of DOM Level 2 methods of element retreival (getElementById, getElementsByTagName, ....)
- * - inheritance of the fake input color style by the caret (at least chrome does this)
  */
 
 (function (factory) {
@@ -87,16 +86,14 @@
         blur: [],
         focus: [],
         keypress: [],
-        keydown: []
+        keydown: [],
+        mouseup: []
     };
 
 
 
     function FakeInput() {
         this.defaults = {
-            rightEdgeAdjustment: 4,    /* number of pixels to subtract from right edge of the fake input  */
-            leftEdgeAdjustment: 1,     /* number of pixels to add from left edge of the fake input */
-            caretAdjustment: 1,        /* number of pixels to subtract from the x coordinates of the fake caret */
             fireInput: true,           /* wether the "input" event should be fired */
             fireChange: true,          /* wether the "change" event should be fired */
             integrateSelectors: true,  /* wether to override the selector API to impersonate input tag in a selector */
@@ -169,7 +166,7 @@
 
             $target._hasChanged = false; // we will use this to trigger change event if needed
 
-            this._setCaretPlugin(target);
+            this._addCaret(target);
 
             this._impersonateInputAttributes($target);
             this._initEvents($target);
@@ -230,28 +227,21 @@
         },
 
         /**
-         * Set the char to use for the caret.
-         * We would almost always want to have the vertical bar '|' but we could use fancier unicode chars if we wanted
-         * (though the width of this char should fit inside 2 adjacent chars as its width is not taken into account
-         * in the future calculations).
+         * Set the caret to the fake input if not already there.
          *
          * @param {HTMLElement} target - the fake input element
-         * @param {String} caretChar - (Optional) the char to use (vertical bar by default)
          * @private
          */
-        _setCaretPlugin: function (target, caretChar) {
+        _addCaret: function (target) {
             var $target = $(target),
                 $fakeCaret = $target.children('.' + this.markerClassName + "-caret")
             ;
-
-            caretChar = caretChar || '|';
 
             if (!$fakeCaret.length) {
                 $fakeCaret = $("<span class='"+ this.markerClassName +"-caret'></span>");
                 $fakeCaret.css("visibility", "hidden");
                 $target.append($fakeCaret);
             }
-            $fakeCaret.text(caretChar);
         },
 
 
@@ -360,47 +350,21 @@
 
         /**
          * Retrieves the the new caret coordinates based on current selectionStart/selectionEnd of the fake input.
+         * Note: the implementation changed from absolute to relative coordinates (when there was only one caret instance).
+         * So the top relative coordinate is superfluous (always 0) but we leave it so that the rest of the code
+         * can remain mostly unchanged if we ever change this again).
          *
          * @param {jQuery} $target - the fake jquery input
          * @returns {top: number, left: number} - the top-left coordinate of the caret
          * @private
          */
-        _getAbsoluteCaretCoordinates: function ($target) {
-            var target = $target[0],
-                $fakeTextNode = $target.children(),
-                caretAdjustment = this._optionPlugin($target, "caretAdjustment"),
-                realTextNode = $fakeTextNode[0].childNodes[0],
-                range = document.createRange(),
-                top,
-                left
-            ;
-
-            if (realTextNode === undefined) {
-                realTextNode = document.createTextNode("");
-                $fakeTextNode.append(realTextNode);
-            }
-
-            // create range from first char to selectionEnd
-            range.setStart(realTextNode, 0);
-            range.setEnd(realTextNode, target.selectionEnd);
-
-            top = target.getBoundingClientRect().top;
-            left = range.getBoundingClientRect().right - caretAdjustment;
-
-            return {
-                top: top,
-                left: left
-            };
-        },
-
         _getRelativeCaretCoordinates: function ($target) {
             var target = $target[0],
                 $fakeTextNode = $target.children('.' + this.markerClassName + '-textnode'),
-                caretAdjustment = this._optionPlugin($target, "caretAdjustment"),
                 realTextNode = $fakeTextNode[0].childNodes[0],
+                currentShift = parseFloat($fakeTextNode.css("left"), 0),
                 range = document.createRange(),
-                targetRect, rangeRect,
-                top, left
+                rangeRect
             ;
 
             if (realTextNode === undefined) {
@@ -411,11 +375,9 @@
             range.setStart(realTextNode, 0);
             range.setEnd(realTextNode, target.selectionEnd);
 
-            targetRect = target.getBoundingClientRect();
             rangeRect = range.getBoundingClientRect();
 
-            top = rangeRect.top - targetRect.top;
-            left = rangeRect.right - targetRect.left - caretAdjustment;
+            left = rangeRect.width - Math.abs(currentShift);
 
             return {
                 top: 0,
@@ -435,14 +397,12 @@
          */
         _getBoundedCaretCoordinates: function ($target) {
             var target = $target[0],
-                rightEdgeAdjustment = this._optionPlugin($target, "rightEdgeAdjustment"),
-                leftEdgeAdjustment = this._optionPlugin($target, "leftEdgeAdjustment"),
                 caretCoords = this._getRelativeCaretCoordinates($target),
                 targetWidth = $target.width()
             ;
 
-            caretCoords.left = Math.max(leftEdgeAdjustment, caretCoords.left);
-            caretCoords.left = Math.min(targetWidth - rightEdgeAdjustment, caretCoords.left);
+            caretCoords.left = Math.max(0, caretCoords.left);
+            caretCoords.left = Math.min(targetWidth, caretCoords.left);
 
             return {
                 top: 0,
@@ -549,9 +509,21 @@
                 // reminder: jquery converts a number to string and append "px" when it detects a number
                 top: coords.top,
                 left: coords.left,
-                height: $target.outerHeight(),
                 visibility: "visible"
             });
+        },
+
+
+        /**
+         * Hide the caret
+         *
+         * @param $target - the fake jquery input
+         * @private
+         */
+        _hideCaret: function ($target) {
+            var $fakeCaret = $target.children('.' + this.markerClassName + "-caret");
+
+            $fakeCaret.css("visibility", "hidden");
         },
 
 
@@ -587,7 +559,7 @@
                 target.selectionStart = target.selectionEnd = selStart;
             }
 
-            this._shiftTextNodeRight($target, deletedTextWidth);
+            this._shiftTextNodeRight($target, Math.floor(deletedTextWidth));
         },
 
 
@@ -653,9 +625,6 @@
         _adjustTextNodePosition: function ($target) {
             var caretCoordsLeft = this._getRelativeCaretCoordinates($target).left,
                 targetWidth = $target.width(),
-                rightEdgeAdjustment = this._optionPlugin($target, "rightEdgeAdjustment"),
-                leftEdgeAdjustment = this._optionPlugin($target, "leftEdgeAdjustment"),
-                targetWidthAdjusted = targetWidth - rightEdgeAdjustment,
                 shift
             ;
             // Example right shift algo:
@@ -667,13 +636,12 @@
             //   +----------------+   ^
             //   <---------------->  relative caret position
             //         width
-            //  (minus rightEdgeAdjustment)
 
-            if (caretCoordsLeft > targetWidthAdjusted) {
-                shift = caretCoordsLeft - targetWidthAdjusted;
+            if (caretCoordsLeft > targetWidth) {
+                shift = Math.floor(caretCoordsLeft - targetWidth);
                 this._shiftTextNodeLeft($target, shift);
-            } else if (caretCoordsLeft < leftEdgeAdjustment) {
-                shift = leftEdgeAdjustment - caretCoordsLeft;
+            } else if (caretCoordsLeft < 0) {
+                shift = Math.floor(0 - caretCoordsLeft);
                 this._shiftTextNodeRight($target, shift);
             }
         },
@@ -733,6 +701,49 @@
 
 
         /**
+         * On mouse down, we use new standard API caretPositionFromPoint() ou old API caretRangeFromPoint() if not supported
+         * to easily determine which character (offset) was pointed by the mouse.
+         *
+         * @param $target - the fake jquery input
+         * @param e - the event object
+         * @private
+         */
+        _handleMousedown: function ($target, e) {
+            var range, caretPosition, offset,
+                target = $target[0],
+                realTextNode = $target.children('.' + this.markerClassName + "-textnode")[0].childNodes[0],
+                selection = window.getSelection()
+            ;
+
+            // this is an over-simplification: real inputs handle moving selection around etc... here we simply discard it.
+            if (selection.isCollapsed === false) {
+                selection.collapseToStart();
+            }
+
+            if (document.caretPositionFromPoint) { // current standard, Firefox only
+                caretPosition = document.caretPositionFromPoint(e.clientX, e.clientY);
+
+                if (caretPosition.offsetNode !== realTextNode) {
+                    range = document.createRange();
+                    range.setStart(realTextNode, 0);
+                    offset = range.startOffset;
+                } else {
+                    offset = caretPosition.offset;
+                }
+
+            } else if (document.caretRangeFromPoint) { // old standard, others
+                range = document.caretRangeFromPoint(e.clientX, e.clientY);
+                if (range.startContainer !== realTextNode) {
+                    range.setStart(realTextNode, 0);
+                }
+                offset = range.startOffset;
+            }
+
+            target.selectionStart = target.selectionEnd = offset;
+        },
+
+
+        /**
          * When the fake input value changes, we can perform some synchronous operations like triggering the "input" event
          * or marking/unmarking the input as valid or invalid
          * @param $target - the fake jquery input
@@ -754,13 +765,52 @@
 
 
         /**
-         * Handle focus event by adjusting the text node position according to current selectionStart/End values.
-         * @param $target - the fake input jquery node
+         * On blur, we hide the caret and dispatch the "changed" even if the input value was changed.
+         * Note: Firefox & Chrome handle blur differently:
+         *    - Chrome: on blur, the text position is reset to the start (far left)
+         *    - Firefox: the text is not repositioned and left as is.
+         * Again, we chose the simplest: do not reposition, like Firefox.
+         *
+         * @param $target - the fake jquery input
          * @private
          */
-        _handleFocus: function ($target) {
-            this._adjustTextNodePosition($target);
+        _handleBlur: function ($target) {
+            var changeEvent;
+
+            this._hideCaret($target);
+
+            if ($target._hasChanged === true && plugin._optionPlugin($target, "fireChange") === true) {
+                changeEvent = new Event("change", {
+                    bubbles: true,
+                    cancelable: false
+                });
+                $target[0].dispatchEvent(changeEvent);
+
+                $target._hasChanged = false;
+            }
         },
+
+
+        /**
+         * On mouseup we detect if a selection was made to adjust the selectionStart & end.
+         * In that case, we hide the caret as done by the modern browsers.
+         *
+         * @param $target - the fake jquery input
+         * @private
+         */
+        _handleMouseup: function ($target) {
+            var selection = window.getSelection(),
+                target = $target[0]
+            ;
+
+            if (selection.anchorNode === selection.focusNode &&
+                selection.isCollapsed === false) {
+                target.selectionStart = selection.anchorOffset;
+                target.selectionEnd = selection.focusOffset;
+                this._hideCaret($target);
+            }
+        },
+
 
         /**
          * Impersonate a mouse or touch event by stopping its propagation immediately and dispatching
@@ -822,22 +872,15 @@
             // mousedown event on fake input will only occur from programmatically created event in the
             // fake inner text node (see above)
             // This sets the caret in-between chars depending on when the user pressed/touched the fake input.
-            fakeInputEventListeners.mousedown.unshift(function (e) {
-                var range, offset;
-
-                if (document.caretPositionFromPoint) { // current standard, Firefox only
-                    range = document.caretPositionFromPoint(e.clientX, e.clientY);
-                    offset = range.offset;
-
-                } else if (document.caretRangeFromPoint) { // old standard, others
-                    range = document.caretRangeFromPoint(e.clientX, e.clientY);
-                    offset = range.startOffset;
-                }
-
-                this.selectionStart = this.selectionEnd = offset;
+            // Note that when the fake text node is empty, the range will apply on the inner fake caret so
+            // we make sure the range concerns the real text node. Other solution would be to catch the event on
+            // the fake input and prevent the bubbling, but this solution can remain untouched if we change the
+            // fake caret implementation (used to be one instance for every inputs).
+            fakeInputEventListeners["mousedown"].unshift(function (e) {
+                plugin._handleMousedown($target, e);
 
                 plugin._showCaret($target);
-                console.log("clicked");
+                console.log("mousedown");
             });
             target.addEventListener("mousedown", fakeInputEventListeners.mousedown[0]);
 
@@ -845,32 +888,14 @@
             // focus & blur events are fired automatically by the browser as the fake inputs were made focusable
             // from adding tabindex
 
-            fakeInputEventListeners.focus.unshift(function () {
-                plugin._handleFocus($target);
+            fakeInputEventListeners["focus"].unshift(function () {
                 plugin._showCaret($target);
                 console.log("focused");
             });
             target.addEventListener("focus", fakeInputEventListeners.focus[0]);
 
-            fakeInputEventListeners.blur.unshift(function () {
-                var changeEvent;
-
-                // Note: Firefox & Chrome handle blur differently:
-                //    - Chrome: on blur, the text position is reset to the start (far left)
-                //    - Firefox: the text is not repositioned and left as is.
-                // Again, we chose the simplest: do not reposition, like Firefox.
-                $fakeCaret.css("visibility", "hidden");
-
-                if ($target._hasChanged === true && plugin._optionPlugin($target, "fireChange") === true) {
-                    changeEvent = new Event("change", {
-                        bubbles: true,
-                        cancelable: false
-                    });
-                    target.dispatchEvent(changeEvent);
-
-                    $target._hasChanged = false;
-                }
-
+            fakeInputEventListeners["blur"].unshift(function () {
+                plugin._handleBlur($target);
                 console.log("blurred");
             });
             target.addEventListener("blur", fakeInputEventListeners.blur[0]);
@@ -879,7 +904,7 @@
             // For now we provide basic cross-browser support by taking into account that Chrome
             // does not fire keypress event when key is not printable (notable exceptions are Backspace or Enter)
             // but Firefox does.
-            fakeInputEventListeners.keypress.unshift(function (e) {
+            fakeInputEventListeners["keypress"].unshift(function (e) {
                 if (e.which !== 13 && e.charCode !== 0) { // not "Enter" and printable key (simplified check for now...)
                     plugin._handleCharKey($target, e.key);
                     plugin._showCaret($target);
@@ -887,7 +912,7 @@
             });
             target.addEventListener("keypress", fakeInputEventListeners.keypress[0]);
 
-            fakeInputEventListeners.keydown.unshift(function (e) {
+            fakeInputEventListeners["keydown"].unshift(function (e) {
                 var selStart = this.selectionStart;
 
                 if (e.which === 8) { // backspace
@@ -911,6 +936,12 @@
                 }
             });
             target.addEventListener("keydown", fakeInputEventListeners.keydown[0]);
+
+            fakeInputEventListeners["mouseup"].unshift(function () {
+                plugin._handleMouseup($target);
+                console.log("mouseup");
+            });
+            target.addEventListener("mouseup", fakeInputEventListeners.mouseup[0]);
         },
 
 
@@ -1110,9 +1141,15 @@
                 // override checkValidity on the form by simply looping over all inputs (fake or not).
                 // Also supports the "form" attribute on input elements that allow to attach an external input to a specified form.
                 parentForm.checkValidity = function () {
-                    var isValid = true;
+                    var isValid = true,
+                        childrenInputs = $parentForm.find("input")
+                    ;
 
-                    $parentForm.find("input").add($("[form=" + parentForm.id + "]")).each(function (index, elt) {
+                    if (parentForm.id) {
+                        childrenInputs.add($("input[form=" + parentForm.id + "]")); // eventual external inputs
+                    }
+
+                    childrenInputs.each(function (index, elt) {
                         isValid = isValid && elt.checkValidity(); // either our fake input or a native one if mix
                         return isValid; // if false, this breaks the jQuery loop
                     });
