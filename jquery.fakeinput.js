@@ -1003,7 +1003,7 @@
                     match = selectorAPI[extensionName][fnName].call(this, modifiedSelector + ", " + selector);
                     if (match !== null) {
                         // remove .inert elements from the set
-                        return selectorAPI.jquery.jqNot.call($(match), '.inert');
+                        return selectorAPI.jquery.not.call($(match), '.inert');
                     }
                 }
             } catch(e) {};

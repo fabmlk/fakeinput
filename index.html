@@ -12,11 +12,23 @@
     <link rel="stylesheet" href="jquery.minkeyboard.css">
     <link rel="stylesheet" href="jquery.fakeinput.css">
 
+    <style>
+        div:nth-of-type(1) input {
+            color: red;
+        }
+
+        div:nth-of-type(2) input {
+            color: green;
+        }
+    </style>
+
 </head>
 <body>
+    <form>
         <input type="text" class="toto" data-min-ref="testouille" id="fake" value="ALL"/>
         <input type="text" class="toto" data-min-ref="testouille" id="none" value="none"/>
         <input type="text" class="toto" data-min-ref="testouille" value="toto" id="real"/>
+    </form>
     <!--<div class="hubert" id="whatever" required></div>-->
 some sample text
 </body>
