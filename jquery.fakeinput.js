@@ -40,6 +40,8 @@
 
     var $realInputProxy = $(); // only one input proxy instance for everyone
 
+    var currentlyFocus = null; // will save the currently focus input
+
     var validationAPI = {
         htmlAttrs:  ["type", "pattern", "maxlength", "min", "max"],
         htmlProps: ["required", "novalidate", "formnovalidate"],
@@ -169,6 +171,7 @@
 
             $target._hasChanged = false; // we will use this to trigger change event if needed
 
+            this._initTextNode($target);
             this._impersonateInputAttributes($target);
             this._initEvents($target);
 
@@ -247,6 +250,24 @@
          */
         _getTextNode: function ($target) {
             return $target.children().children('.' + this.markerClassName + "-textnode");
+        },
+
+
+        /**
+         * Create a real text node as child of the fake text node if it doesn't have one yet
+         *
+         * @param $target - the fake jquery input
+         * @private
+         */
+        _initTextNode: function ($target) {
+            var $fakeTextNode = this._getTextNode($target),
+                realTextNode = $fakeTextNode[0].childNodes[0]
+            ;
+
+            if (realTextNode === undefined) {
+                realTextNode = document.createTextNode("");
+                $fakeTextNode.append(realTextNode);
+            }
         },
 
 
@@ -340,15 +361,20 @@
             target.selectionStart = target.selectionEnd = $fakeTextNode.text().length;
 
             target.focus = function () {
+                currentlyFocus.blur(); // blur the previous one
+
                 // don't use jquery trigger as it will call .focus() => infinite loop!
                 var focusEvent = new FocusEvent("focus");
                 target.dispatchEvent(focusEvent);
+
+                currentlyFocus = target;
             };
 
             target.blur = function () {
                 // don't use jquery trigger as it will call .blur() => infinite loop!
                 var blurEvent = new FocusEvent("blur"); // Blur hérite de FocusEvent interface
                 target.dispatchEvent(blurEvent);
+                currentlyFocus = null;
             };
         },
 
@@ -371,11 +397,6 @@
                 range = document.createRange(),
                 rangeRect
             ;
-
-            if (realTextNode === undefined) {
-                realTextNode = document.createTextNode("");
-                $fakeTextNode.append(realTextNode);
-            }
 
             range.setStart(realTextNode, 0);
             range.setEnd(realTextNode, target.selectionEnd);
@@ -406,7 +427,7 @@
                 wrapperWidth = $target.children().width()
             ;
 
-            caretCoords.left = Math.max(0, caretCoords.left);
+            caretCoords.left = Math.max(1, caretCoords.left);
             caretCoords.left = Math.min(wrapperWidth, caretCoords.left);
 
             return {
@@ -562,6 +583,9 @@
                 selStart = Math.max(selStart - 1, 0);
                 target.value = value.slice(0, selStart) + value.slice(selEnd);
                 target.selectionStart = target.selectionEnd = selStart;
+            }
+            if (target.selectionStart === 0) {
+                this._initTextNode($target); // re-create the text node!
             }
 
             this._shiftTextNodeRight($target, Math.floor(deletedTextWidth));

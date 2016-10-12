@@ -36,11 +36,11 @@
     border-width: 0;
 
     /* By adding a right padding, we make sure the caret will be always visible even if set at the very right of the box.
-       This used to be taken into account in the JS calculations. Because of this being done in CSS, we need to also
-       add a corresponding negative margin to make sure the visible width stays accurate. (We don't want to use
-       border-box as we don't want to override the default box-sizing if was specified on the real input) */
+       This used to be taken into account in the JS calculations. Because of this being done in CSS, we might lose one half pixel
+       compared to the inherited width of a real input... too bad! (We don't want to use border-box as we don't want to
+       override the default box-sizing if it was specified on the real input) */
     padding-right: 1px !important;
-    margin-left: -1px !important;
+    margin-left: -0.5px !important;
 
     /* if the text node gets empty, we still want to take up the whole space */
     width: 100%;
