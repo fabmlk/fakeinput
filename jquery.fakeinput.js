@@ -162,11 +162,12 @@
             this._impersonateInputStyle($target); // do this before adding child textnode!
 
             $target.attr("tabindex", "1") // make it focusable/tabbable
-                .html("<span class='" + this.markerClassName + "-textnode'>" + currentValue + "</span>"); // fake text node
+                .html("<div class='" + this.markerClassName + "-mask" + "'>" + // block wrapper
+                    "<span class='" + this.markerClassName + "-textnode'>" + currentValue + "</span>" + // text node
+                    "<span class='"+ this.markerClassName +"-caret' style='visibility: hidden'></span>" + // caret
+                    "</div>");
 
             $target._hasChanged = false; // we will use this to trigger change event if needed
-
-            this._addCaret(target);
 
             this._impersonateInputAttributes($target);
             this._initEvents($target);
@@ -226,22 +227,26 @@
             }
         },
 
+
         /**
-         * Set the caret to the fake input if not already there.
-         *
-         * @param {HTMLElement} target - the fake input element
+         * Returns the fake input caret.
+         * @param $target - the fake jquery input
+         * @returns {jQuery} the fake caret
          * @private
          */
-        _addCaret: function (target) {
-            var $target = $(target),
-                $fakeCaret = $target.children('.' + this.markerClassName + "-caret")
-            ;
+        _getCaret: function ($target) {
+            return $target.children().children('.' + this.markerClassName + "-caret");
+        },
 
-            if (!$fakeCaret.length) {
-                $fakeCaret = $("<span class='"+ this.markerClassName +"-caret'></span>");
-                $fakeCaret.css("visibility", "hidden");
-                $target.append($fakeCaret);
-            }
+
+        /**
+         * Returns the fake input inner text node.
+         * @param $target - the fake jquery input
+         * @returns {jQuery} the fake text node
+         * @private
+         */
+        _getTextNode: function ($target) {
+            return $target.children().children('.' + this.markerClassName + "-textnode");
         },
 
 
@@ -314,7 +319,7 @@
          */
         _impersonateInputAttributes: function ($target) {
             var target = $target[0],
-                $fakeTextNode = $target.children('.' + this.markerClassName + "-textnode")
+                $fakeTextNode = this._getTextNode($target)
             ;
 
             // define the getter & setter for the value property
@@ -360,7 +365,7 @@
          */
         _getRelativeCaretCoordinates: function ($target) {
             var target = $target[0],
-                $fakeTextNode = $target.children('.' + this.markerClassName + '-textnode'),
+                $fakeTextNode = this._getTextNode($target),
                 realTextNode = $fakeTextNode[0].childNodes[0],
                 currentShift = parseFloat($fakeTextNode.css("left"), 0),
                 range = document.createRange(),
@@ -398,11 +403,11 @@
         _getBoundedCaretCoordinates: function ($target) {
             var target = $target[0],
                 caretCoords = this._getRelativeCaretCoordinates($target),
-                targetWidth = $target.width()
+                wrapperWidth = $target.children().width()
             ;
 
             caretCoords.left = Math.max(0, caretCoords.left);
-            caretCoords.left = Math.min(targetWidth, caretCoords.left);
+            caretCoords.left = Math.min(wrapperWidth, caretCoords.left);
 
             return {
                 top: 0,
@@ -420,7 +425,7 @@
          * @private
          */
         _getTextContentWidth: function ($target, text) {
-            var $fakeTextNode = $target.children('.' + this.markerClassName + "-textnode"),
+            var $fakeTextNode = this._getTextNode($target),
                 textIdx = $fakeTextNode.text().indexOf(text),
                 range
             ;
@@ -466,7 +471,7 @@
          * @private
          */
         _shiftTextNodeLeft: function ($target, value) {
-            var $fakeTextNode = $target.children('.' + this.markerClassName + "-textnode");
+            var $fakeTextNode = this._getTextNode($target);
 
             $fakeTextNode.css("left", "-=" + value);
         },
@@ -483,7 +488,7 @@
          * @private
          */
         _shiftTextNodeRight: function ($target, value) {
-            var $fakeTextNode = $target.children('.' + this.markerClassName + "-textnode"),
+            var $fakeTextNode = this._getTextNode($target),
                 currentShiftLeft = parseInt($fakeTextNode.css("left"), 0) || 0
             ;
 
@@ -502,7 +507,7 @@
          */
         _showCaret: function ($target) {
             var coords = this._getBoundedCaretCoordinates($target),
-                $fakeCaret = $target.children('.' + this.markerClassName + "-caret")
+                $fakeCaret = this._getCaret($target)
             ;
 
             $fakeCaret.css({
@@ -521,7 +526,7 @@
          * @private
          */
         _hideCaret: function ($target) {
-            var $fakeCaret = $target.children('.' + this.markerClassName + "-caret");
+            var $fakeCaret = this._getCaret($target);
 
             $fakeCaret.css("visibility", "hidden");
         },
@@ -624,7 +629,7 @@
          */
         _adjustTextNodePosition: function ($target) {
             var caretCoordsLeft = this._getRelativeCaretCoordinates($target).left,
-                targetWidth = $target.width(),
+                wrapperWidth = $target.children().width(),
                 shift
             ;
             // Example right shift algo:
@@ -637,8 +642,8 @@
             //   <---------------->  relative caret position
             //         width
 
-            if (caretCoordsLeft > targetWidth) {
-                shift = Math.floor(caretCoordsLeft - targetWidth);
+            if (caretCoordsLeft > wrapperWidth) {
+                shift = Math.floor(caretCoordsLeft - wrapperWidth);
                 this._shiftTextNodeLeft($target, shift);
             } else if (caretCoordsLeft < 0) {
                 shift = Math.floor(0 - caretCoordsLeft);
@@ -711,7 +716,7 @@
         _handleMousedown: function ($target, e) {
             var range, caretPosition, offset,
                 target = $target[0],
-                realTextNode = $target.children('.' + this.markerClassName + "-textnode")[0].childNodes[0],
+                realTextNode = this._getTextNode($target)[0].childNodes[0],
                 selection = window.getSelection()
             ;
 
@@ -761,6 +766,16 @@
             if (this._optionPlugin(target, "integrateValidations") === true) {
                 this._toggleValidityClasses($target, target.checkValidity());
             }
+        },
+
+
+        /**
+         * Handle focus event by adjusting the text node position according to current selectionStart/End values.
+         * @param $target - the fake input jquery node
+         * @private
+         */
+        _handleFocus: function ($target) {
+            this._adjustTextNodePosition($target);
         },
 
 
@@ -846,8 +861,7 @@
          */
         _initEvents: function ($target) {
             var target = $target[0],
-                fakeTextNode = $target.children('.' + this.markerClassName + "-textnode")[0],
-                $fakeCaret = $target.children('.' + this.markerClassName + "-caret")
+                fakeTextNode = this._getTextNode($target)[0]
             ;
 
             // we don't use jquery events to have total controls in case it gets tricky...
@@ -889,6 +903,7 @@
             // from adding tabindex
 
             fakeInputEventListeners["focus"].unshift(function () {
+                plugin._handleFocus($target);
                 plugin._showCaret($target);
                 console.log("focused");
             });
@@ -1345,7 +1360,7 @@
          */
         _destroyPlugin: function (target) {
             var $target = $(target),
-                fakeTextNode = $target.children('.' + this.markerClassName + "-textnode")[0],
+                fakeTextNode = this._getTextNode($target)[0],
                 inst = $target.data(this.propertyName),
                 eventName
             ;
