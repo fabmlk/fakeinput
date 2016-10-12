@@ -39,8 +39,6 @@
 
     var getters = []; // list of getter methods (none for the moment)
 
-    var $fakeCaret = $(); // only one caret instance for everyone
-
     var $realInputProxy = $(); // only one input proxy instance for everyone
 
     var validationAPI = {
@@ -61,10 +59,10 @@
         // TODO: provide an extension API to allow the user to define its own
         // overrides in order to handle any kind of third-party selector APIs
         jquery: {
-            jqFilter: $.fn.filter,
-            jqFind: $.fn.find,
-            jqNot: $.fn.not,
-            jqIs: $.fn.is
+            filter: $.fn.filter,
+            find: $.fn.find,
+            not: $.fn.not,
+            is: $.fn.is
         }
     };
 
@@ -171,7 +169,7 @@
 
             $target._hasChanged = false; // we will use this to trigger change event if needed
 
-            this._setCaretPlugin();
+            this._setCaretPlugin(target);
 
             this._impersonateInputAttributes($target);
             this._initEvents($target);
@@ -237,16 +235,21 @@
          * (though the width of this char should fit inside 2 adjacent chars as its width is not taken into account
          * in the future calculations).
          *
+         * @param {HTMLElement} target - the fake input element
          * @param {String} caretChar - (Optional) the char to use (vertical bar by default)
          * @private
          */
-        _setCaretPlugin: function (caretChar) {
+        _setCaretPlugin: function (target, caretChar) {
+            var $target = $(target),
+                $fakeCaret = $target.children('.' + this.markerClassName + "-caret")
+            ;
+
             caretChar = caretChar || '|';
 
             if (!$fakeCaret.length) {
-                $fakeCaret = $("<span id='" + this.markerClassName + "-fakecaret' class='"+ this.markerClassName +"-fakecaret'></span>");
-                StyleHelper.makeInert($fakeCaret[0]);
-                $("body").append($fakeCaret);
+                $fakeCaret = $("<span class='"+ this.markerClassName +"-caret'></span>");
+                $fakeCaret.css("visibility", "hidden");
+                $target.append($fakeCaret);
             }
             $fakeCaret.text(caretChar);
         },
@@ -265,8 +268,8 @@
                 doppleganger,
                 dopplegangerStyle,
                 markerClassDoppleganger = this.markerClassName + "-doppleganger",
-                // do not user selector API as we already filter it from the result set!
-                $previousDoppleGanger = $(document.getElementsByClassName(markerClassDoppleganger)),
+                // use original selector API as we filter ".inert" from the result set in our custom ones
+                $previousDoppleGanger = $(selectorAPI.native.querySelector.call(document, '.' + markerClassDoppleganger)),
                 // this counter allows us to create a unique css rule each time
                 styleIncr = $previousDoppleGanger.length ? $previousDoppleGanger.data("incr") : 0
             ;
@@ -321,7 +324,7 @@
          */
         _impersonateInputAttributes: function ($target) {
             var target = $target[0],
-                $fakeTextNode = $target.children()
+                $fakeTextNode = $target.children('.' + this.markerClassName + "-textnode")
             ;
 
             // define the getter & setter for the value property
@@ -390,10 +393,41 @@
             };
         },
 
+        _getRelativeCaretCoordinates: function ($target) {
+            var target = $target[0],
+                $fakeTextNode = $target.children('.' + this.markerClassName + '-textnode'),
+                caretAdjustment = this._optionPlugin($target, "caretAdjustment"),
+                realTextNode = $fakeTextNode[0].childNodes[0],
+                range = document.createRange(),
+                targetRect, rangeRect,
+                top, left
+            ;
+
+            if (realTextNode === undefined) {
+                realTextNode = document.createTextNode("");
+                $fakeTextNode.append(realTextNode);
+            }
+
+            range.setStart(realTextNode, 0);
+            range.setEnd(realTextNode, target.selectionEnd);
+
+            targetRect = target.getBoundingClientRect();
+            rangeRect = range.getBoundingClientRect();
+
+            top = rangeRect.top - targetRect.top;
+            left = rangeRect.right - targetRect.left - caretAdjustment;
+
+            return {
+                top: 0,
+                left: left
+            };
+        },
+
 
         /**
          * Retrieves the new caret coordinates based on current selectionStart/selectionEnd,
-         * bounded by the fake input box coordinates and edge adjustments options.
+         * bounded by the fake input box coordinates and edge adjustments
+         * options.
          *
          * @param $target - the fake jquery input
          * @returns {{top: (Number|*), left: (number|*)}} - the bounded caret coordinates
@@ -402,33 +436,17 @@
         _getBoundedCaretCoordinates: function ($target) {
             var target = $target[0],
                 rightEdgeAdjustment = this._optionPlugin($target, "rightEdgeAdjustment"),
-                $fakeTextNode = $target.children(),
-                caretCoords = this._getAbsoluteCaretCoordinates($target),
-                targetRect,
-                adjustedRangeRectLeft,
-                adjustedTargetRectRight,
-                constrainedLeft
+                leftEdgeAdjustment = this._optionPlugin($target, "leftEdgeAdjustment"),
+                caretCoords = this._getRelativeCaretCoordinates($target),
+                targetWidth = $target.width()
             ;
 
-            targetRect = target.getBoundingClientRect();
-
-            // rectangle objects are readonly, so we have to introduce new variables to adjust the values
-            adjustedRangeRectLeft = caretCoords.left - (parseInt($fakeTextNode.css("left"), 0) || 0);
-            adjustedTargetRectRight = targetRect.right - rightEdgeAdjustment;
-
-            constrainedLeft = caretCoords.left;
-
-            // prevent going outside fake input borders
-            if (caretCoords.left > adjustedTargetRectRight) {
-                constrainedLeft = adjustedTargetRectRight;
-            }
-            if (adjustedRangeRectLeft < targetRect.left) {
-                constrainedLeft = targetRect.left;
-            }
+            caretCoords.left = Math.max(leftEdgeAdjustment, caretCoords.left);
+            caretCoords.left = Math.min(targetWidth - rightEdgeAdjustment, caretCoords.left);
 
             return {
-                top: caretCoords.top,
-                left: constrainedLeft
+                top: 0,
+                left: caretCoords.left
             };
         },
 
@@ -442,7 +460,7 @@
          * @private
          */
         _getTextContentWidth: function ($target, text) {
-            var $fakeTextNode = $target.children(),
+            var $fakeTextNode = $target.children('.' + this.markerClassName + "-textnode"),
                 textIdx = $fakeTextNode.text().indexOf(text),
                 range
             ;
@@ -488,7 +506,7 @@
          * @private
          */
         _shiftTextNodeLeft: function ($target, value) {
-            var $fakeTextNode = $target.children();
+            var $fakeTextNode = $target.children('.' + this.markerClassName + "-textnode");
 
             $fakeTextNode.css("left", "-=" + value);
         },
@@ -505,7 +523,7 @@
          * @private
          */
         _shiftTextNodeRight: function ($target, value) {
-            var $fakeTextNode = $target.children(),
+            var $fakeTextNode = $target.children('.' + this.markerClassName + "-textnode"),
                 currentShiftLeft = parseInt($fakeTextNode.css("left"), 0) || 0
             ;
 
@@ -523,16 +541,17 @@
          * @private
          */
         _showCaret: function ($target) {
-            var coords = this._getBoundedCaretCoordinates($target);
+            var coords = this._getBoundedCaretCoordinates($target),
+                $fakeCaret = $target.children('.' + this.markerClassName + "-caret")
+            ;
 
             $fakeCaret.css({
                 // reminder: jquery converts a number to string and append "px" when it detects a number
                 top: coords.top,
                 left: coords.left,
-                height: $target.outerHeight()
+                height: $target.outerHeight(),
+                visibility: "visible"
             });
-
-            StyleHelper.unmakeInert($fakeCaret[0]);
         },
 
 
@@ -632,12 +651,11 @@
          * @private
          */
         _adjustTextNodePosition: function ($target) {
-            var absCaretCoordsLeft = this._getAbsoluteCaretCoordinates($target).left,
-                targetRect = $target[0].getBoundingClientRect(),
+            var caretCoordsLeft = this._getRelativeCaretCoordinates($target).left,
+                targetWidth = $target.width(),
                 rightEdgeAdjustment = this._optionPlugin($target, "rightEdgeAdjustment"),
                 leftEdgeAdjustment = this._optionPlugin($target, "leftEdgeAdjustment"),
-                targetRightEdgeAdjusted = targetRect.right - rightEdgeAdjustment,
-                targetLeftEdgeAdjusted = targetRect.left + leftEdgeAdjustment,
+                targetWidthAdjusted = targetWidth - rightEdgeAdjustment,
                 shift
             ;
             // Example right shift algo:
@@ -647,16 +665,15 @@
             //   +----------------+
             //   |AAAAAAAAAAAAAAAA|   |
             //   +----------------+   ^
-            //                    ^   absolute caret position
-            //                    |
-            //                   right edge
-            //             (minus rightEdgeAdjustment)
+            //   <---------------->  relative caret position
+            //         width
+            //  (minus rightEdgeAdjustment)
 
-            if (absCaretCoordsLeft > targetRightEdgeAdjusted) {
-                shift = absCaretCoordsLeft - targetRightEdgeAdjusted;
+            if (caretCoordsLeft > targetWidthAdjusted) {
+                shift = caretCoordsLeft - targetWidthAdjusted;
                 this._shiftTextNodeLeft($target, shift);
-            } else if (absCaretCoordsLeft < targetLeftEdgeAdjusted) {
-                shift = targetLeftEdgeAdjusted - absCaretCoordsLeft;
+            } else if (caretCoordsLeft < leftEdgeAdjustment) {
+                shift = leftEdgeAdjustment - caretCoordsLeft;
                 this._shiftTextNodeRight($target, shift);
             }
         },
@@ -779,7 +796,8 @@
          */
         _initEvents: function ($target) {
             var target = $target[0],
-                fakeTextNode = $target.children()[0]
+                fakeTextNode = $target.children('.' + this.markerClassName + "-textnode")[0],
+                $fakeCaret = $target.children('.' + this.markerClassName + "-caret")
             ;
 
             // we don't use jquery events to have total controls in case it gets tricky...
@@ -837,18 +855,11 @@
             fakeInputEventListeners.blur.unshift(function () {
                 var changeEvent;
 
-                // as there is only one caret instance for all fake inputs, we could think this handler
-                // should be attached on the document via bubbling/delegation instead of attaching the handler
-                // for every elements.
-                // But by definition, the blur/focus events should not bubble. We could make it bubble via jquery
-                // using delegation (see doc) but this could introduce hard to find bugs from the client script,
-                // so we stick to attaching the handler for everyone.
-                //
                 // Note: Firefox & Chrome handle blur differently:
                 //    - Chrome: on blur, the text position is reset to the start (far left)
                 //    - Firefox: the text is not repositioned and left as is.
                 // Again, we chose the simplest: do not reposition, like Firefox.
-                StyleHelper.makeInert($fakeCaret[0]);
+                $fakeCaret.css("visibility", "hidden");
 
                 if ($target._hasChanged === true && plugin._optionPlugin($target, "fireChange") === true) {
                     changeEvent = new Event("change", {
@@ -983,7 +994,6 @@
             // native API under the hood, the Sizzle engine actually saves references to the
             // native functions before our override code even run!
             jqFnNames.forEach(function (name) {
-                var capitalized = name[0].toUpperCase() + name.substring(1);
 
                 // Those jquery selector functions are also called from inside jQuery code,
                 // meaning the context can change between $.fn and window.
@@ -991,9 +1001,9 @@
                 $.fn[name] = function (selector) {
                     // jquery support other type of arguments (jquery object, html element etc...) we don't want to override
                     if (typeof selector === "string") {
-                        return plugin._querySelector.call(this, "jquery", "jq" + capitalized, selector);
+                        return plugin._querySelector.call(this, "jquery", name, selector);
                     }
-                    return selectorAPI.jquery["jq" + capitalized].call(this, selector);
+                    return selectorAPI.jquery[name].call(this, selector);
                 };
             });
 
@@ -1298,8 +1308,8 @@
          */
         _destroyPlugin: function (target) {
             var $target = $(target),
-                fakeTextNode = $target.children()[0],
-                inst = $target.data(this.markerClassName),
+                fakeTextNode = $target.children('.' + this.markerClassName + "-textnode")[0],
+                inst = $target.data(this.propertyName),
                 eventName
             ;
 
@@ -1324,8 +1334,6 @@
                     target.removeEventListener(eventName, fakeInputEventListeners[eventName].pop());
                 }
 
-                $fakeCaret.remove();
-                $fakeCaret = $();
                 $realInputProxy.remove();
                 $realInputProxy = $();
             }
