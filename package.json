@@ -15,5 +15,8 @@
   "bugs": {
     "url": "https://github.com/fabmlk/jquery-fakeinput/issues"
   },
-  "homepage": "https://github.com/fabmlk/jquery-fakeinput#readme"
+  "homepage": "https://github.com/fabmlk/jquery-fakeinput#readme",
+  "dependencies": {
+    "stylehelper": "https://github.com/fabmlk/stylehelper.git"
+  }
 }
