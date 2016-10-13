@@ -96,6 +96,18 @@
 
     function FakeInput() {
         this.defaults = {
+            ignoredStyleProperties: [],/* List of css properties to ignore when calculating the fake input style.
+                                          When calculating the style of real input in the current context, a CSS rule with
+                                          the computed style will be inserted as a class and applied to the element.
+                                          But there are cases where we actually don't want to apply a certain computed property because
+                                          it will override an inherited style due to selectivity.
+                                          For instance, if a computed visibility is hidden because of a parent being hidden by inheritance,
+                                          if the user later changes the parent visibility to visible, the element will still preserve its
+                                          hidden visibility as it is still present in the css rule applied to it, which would typically not
+                                          be the expected behaviour from the user's perspective.
+                                          One way to automate this would be to discard any inherited properties, but figuring out what is
+                                          inherited and what is not when using getComputedStyle() is a no-go, so instead we let the user
+                                          handle individual cases manually. */
             fireInput: true,           /* wether the "input" event should be fired */
             fireChange: true,          /* wether the "change" event should be fired */
             integrateSelectors: true,  /* wether to override the selector API to impersonate input tag in a selector */
@@ -137,7 +149,8 @@
         _attachPlugin: function (target, options) {
             var inst,
                 $target = $(target),
-                currentValue = $target.prop("value") || $target.attr("value") || ""
+                currentValue = $target.prop("value") || $target.attr("value") || "",
+                inputStyles
             ;
 
             if ($target.hasClass(this.markerClassName)) { // already attached
@@ -149,7 +162,10 @@
                 originalElement: target
             };
 
-            var styles = this._getStyleFutureInput($target);
+            inputStyles = this._getStyleFutureInput($target);
+            (options.ignoredStyleProperties || []).forEach(function (prop) {
+                StyleHelper.removeProp(inputStyles, prop);
+            });
 
             // We turn the target into our fake input, inheriting all attributes/properties currently assigned inline on
             // the element(whatever the type of the element).
@@ -163,7 +179,7 @@
 
             $target.data(this.propertyName, inst);
 
-            this._impersonateInputStyle($target, styles); // do this before adding child textnode!
+            this._impersonateInputStyle($target, inputStyles); // do this before adding child textnode!
 
             $target.attr("tabindex", "1") // make it focusable/tabbable
                 .html("<div class='" + this.markerClassName + "-mask" + "'>" + // block wrapper
@@ -291,17 +307,17 @@
                 visibleComputedStyle
             ;
 
-            if (selectorAPI.jquery.is.call($target, "input[type='text'")) {
+            if (selectorAPI.jquery.is.call($target, "input[type='text'")) { // is our element already a real input text?
                 $input = $target;
                 visibleComputedStyle = StyleHelper.getVisibleComputedStyle($input[0]);
-            } else {
+            } else { // we create a fake input in the context of its parent
                 $input = $(target.outerHTML.replace(target.tagName.toLowerCase(), "input")).removeAttr("id");
                 StyleHelper.makeInert($input, stylesToRestore);
                 $target.after($input);
                 visibleComputedStyle = StyleHelper.getVisibleComputedStyle($input[0]);
                 $input.remove();
 
-                for (var prop in stylesToRestore) { // override styles
+                for (var prop in stylesToRestore) { // restore styles affected by inert
                     if (stylesToRestore.hasOwnProperty(prop)) {
                         visibleComputedStyle[prop] = stylesToRestore[prop];
                     }

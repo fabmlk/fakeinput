@@ -121,7 +121,7 @@
          */
         getVisibleComputedStyle: function (elt) {
             var savedDisplayNone = [],
-                savedIdx = 0, cur, prop,
+                cur, prop,
                 overridenStyles = {
                     display: "block",
                     position: "absolute",
@@ -131,19 +131,21 @@
                 visibleComputedStyle
             ;
 
+            // Algo: for any ancestor with display none, display the ancestor back, outside of the viewport,
+            // and compute the style there. On the way, save any overriden inline styles so we can
+            // restore them when we're done.
             for (cur = elt; cur !== null; cur = cur.parentNode) {
                 if (cur.nodeType === 1 && window.getComputedStyle(cur).display === "none") {
-                    savedDisplayNone.push({
+                    savedDisplayNone.unshift({
                         elm: cur,
                         inlineStyle: {}
                     });
                     for (prop in overridenStyles) {
                         if (cur.style[prop]) {
-                            savedDisplayNone[savedIdx].inlineStyle[prop] = cur.style[prop];
+                            savedDisplayNone[0].inlineStyle[prop] = cur.style[prop];
                         }
                         cur.style.setProperty(prop, overridenStyles[prop], "important");
                     }
-                    savedIdx++;
                 }
             }
             visibleComputedStyle = window.getComputedStyle(elt);
@@ -152,7 +154,7 @@
             // Object.assign removes:
             //   - properties with values undefined|null (ex: src: "")
             //   - inherited properties (hasOwnProperty() is false) (ex: cssText, length)
-            //   - non-enumerable properties (propertyIsEnumerable() is false) (ex: 0: animation-delay)
+            //   - non-enumerable properties (propertyIsEnumerable() is false) <=> all properties retrievable from .item() (ex: 0: animation-delay)
             // This results in a trim CSSStyleDeclaration (or CSS2Properties on Firefox)
             visibleComputedStyle = Object.assign({
                 cssText: visibleComputedStyle.cssText, // keep cssText in case is present
@@ -318,6 +320,20 @@
         unmakeInert: function (elt) {
             elt.classList.remove("inert");
             elt.setAttribute("tabindex", elt.dataset.tabindex);
+        },
+
+
+        /**
+         * Remove a css property from a CSSStyleDeclaration or CSS2Properties or object as returned by getVisibleComputedStyle.
+         *
+         * @param {Object] styleDeclaration
+         * @param {String} prop - the name of the property to remove
+         */
+        removeProp: function (styleDeclaration, prop) {
+            delete styleDeclaration[prop];
+            if (styleDeclaration.cssText) {
+                styleDeclaration.cssText = styleDeclaration.cssText.replace(new RegExp(prop + ":[^;]+;"), "");
+            }
         },
     };
 }));
