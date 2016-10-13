@@ -5,27 +5,27 @@
 }
 
 .fab-fakeinput {
-    position: relative !important; /* so we can position the text node inside */
-    overflow: hidden !important;
+    position: relative; /* so we can position the text node inside */
+    overflow: hidden;
     /* Input elements are "replaced elements", as such they are neither inline nor inline-block nor block
        but they behave like inline-block elements. Chrome reports conveniently the element as being inline-block
        when both displayed in dev tools or retrieved from getComputedStyle().
        Oddly, Firefox shows "inline" in its inspector but returns "block" from getComputedStyle().
        Because of this, we have to force the display to inline-block explicitly */
-    display: inline-block !important;
+    display: inline-block;
 
     /* As we set its position to relative, the "inherited" top & left that normally would not
        apply on a static real input can take effect here, so we need to cancel it.*/
-    top: 0 !important;
-    left: 0 !important;
+    top: 0;
+    left: 0;
 
     /* by default, white-space is "normal" meaning whitespaces are collapsed. We want to preserve them. */
-    white-space: pre !important;
-    cursor: text !important;
+    white-space: pre;
+    cursor: text;
 
     /* If this property was set on a real input, it will override any "color" property set on our fake input.
        In order to be able to change the color via the "color" property, we have to explicitly inherit this property */
-    -webkit-text-fill-color: inherit !important;
+    -webkit-text-fill-color: inherit;
 }
 
 .fab-fakeinput-mask {
@@ -39,8 +39,8 @@
        This used to be taken into account in the JS calculations. Because of this being done in CSS, we might lose one half pixel
        compared to the inherited width of a real input... too bad! (We don't want to use border-box as we don't want to
        override the default box-sizing if it was specified on the real input) */
-    padding-right: 1px !important;
-    margin-left: -0.5px !important;
+    padding-right: 1px;
+    margin-left: -0.5px;
 
     /* if the text node gets empty, we still want to take up the whole space */
     width: 100%;
@@ -74,4 +74,8 @@
     pointer-events: none;
 
     animation: 1s blink infinite steps(1);
+}
+
+.fab-fakeinput-doppleganger {
+    position: absolute;
 }

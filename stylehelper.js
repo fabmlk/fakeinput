@@ -57,7 +57,8 @@
                 } else {
                     style.appendChild(document.createTextNode(css));
                 }
-                head.appendChild(style);
+                // insert stylesheet before everything else so they can be overridden easily
+                head.insertBefore(style, head.firstChild);
                 inertSheet = style.sheet;
             };
             return inertSheet;

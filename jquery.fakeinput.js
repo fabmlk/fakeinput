@@ -233,6 +233,10 @@
 
         /**
          * Returns the fake input caret.
+         * Note: earlier implementation used to have only one caret instance for every fake inputs.
+         * This was dropped because it required being absolutely positioned, which breaks when
+         * css transform translation on a container.
+         *
          * @param $target - the fake jquery input
          * @returns {jQuery} the fake caret
          * @private
@@ -310,6 +314,25 @@
             $doppleganger.data("incr", styleIncr); // save current incrementation
             $realInputProxy = $doppleganger; // whenever a real input proxy will be needed for validation, we can use this one
 
+            var adjustedCss = [];
+            for (var cur = target, $cur = $target; cur !== null; cur = target.parentNode) {
+                if ($cur.css("display") === "none") {
+                    adjustedCss.push({
+                        elm: cur,
+                        style: {
+                            position: $cur.css("position"),
+                            opacity: $cur.css("opacity"),
+                            top: $cur.css("top")
+                        }
+                    });
+                    $cur.css({
+                        position: "absolute",
+                        opacity: 0,
+                        top: -99999
+                    });
+                }
+            }
+
             // insert a real input with the same parent so we can retrieve all its calculated styles
             stylesToRestore = StyleHelper.makeInert(doppleganger);
             $target.after($doppleganger);
@@ -322,6 +345,17 @@
             dopplegangerStyle = StyleHelper.addCSSRule('.' + this.markerClassName + '-' + styleIncr,
                 StyleHelper.getComputedStyleCssText(doppleganger));
 
+            adjustedCss.forEach(function (saved) {
+                $(saved.elm).css({
+                    position: saved.style.position,
+                    opacity: saved.style.opacity,
+                    top: saved.style.top
+                });
+                stylesToRestore.position = saved.style.position;
+                stylesToRestore.opacity = saved.style.opacity;
+                stylesToRestore.top = saved.style.top;
+            });
+
             for (var prop in stylesToRestore) { // override styles
                 if (stylesToRestore.hasOwnProperty(prop)) {
                     dopplegangerStyle[prop] = stylesToRestore[prop];
@@ -330,6 +364,7 @@
 
             $target.addClass(this.markerClassName + ' ' + this.markerClassName + '-' + styleIncr);
         },
+
 
 
         /**
@@ -361,7 +396,9 @@
             target.selectionStart = target.selectionEnd = $fakeTextNode.text().length;
 
             target.focus = function () {
-                currentlyFocus.blur(); // blur the previous one
+                if (currentlyFocus) {
+                    currentlyFocus.blur(); // blur the previous one
+                }
 
                 // don't use jquery trigger as it will call .focus() => infinite loop!
                 var focusEvent = new FocusEvent("focus");
@@ -376,6 +413,8 @@
                 target.dispatchEvent(blurEvent);
                 currentlyFocus = null;
             };
+
+            target.name = $target.attr("name"); // this breaks if the name is later set via .attr(), we could use getter instead
         },
 
 
