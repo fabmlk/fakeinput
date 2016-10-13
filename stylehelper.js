@@ -66,28 +66,113 @@
 
 
         /**
+         * Get computed cssText from element.
+         *
+         * @param {Element} elt
+         * @returns {String} the css text
+         */
+        getComputedStyleCssText: function (elt) {
+            var style = window.getComputedStyle(elt);
+
+            return this.getCssTextFromStyle(style);
+        },
+
+
+        /**
+         * Get cssText from style
          * There is an old bug in Firefox where cssText returns empty "" on
          * a CSSStyleDeclaration object (we can also notice from the Firefox debugger
          * that getComputedStyle() returns a CSS2Properties Object instead of CSSStyleDeclaration).
          * See https://bugzilla.mozilla.org/show_bug.cgi?id=137687.
          * (still present in version 49.0.1).
          *
-         * @param elt
-         * @returns {*}
+         * @param {Object} style - a CSSStyleDeclaration or CSS2Properties or object as returned from getVisibleComputedStyle()
+         * @returns {String} the css text
          */
-        getComputedStyleCssText: function (elt) {
-            var style = window.getComputedStyle(elt), cssText;
+        getCssTextFromStyle: function (style) {
+            var cssText = "";
 
-            if (style.cssText != "") {
+
+            if (style.cssText) { // CSSStyleDeclaration
                 return style.cssText;
             }
 
-            cssText = "";
-            for (var i = 0; i < style.length; i++) {
-                cssText += style[i] + ": " + style.getPropertyValue(style[i]) + "; ";
+            for (var prop in style) {
+                cssText += prop + ": " + (style.getPropertyValue ? style.getPropertyValue(prop) : style[prop]) + "; ";
             }
 
             return cssText;
+        },
+
+
+        /**
+         * Returns the css computed style. If the element is not visisble, this function calculates its style
+         * if it was visible.
+         * The object returned is a trimmed CSSStyleDeclaration due to the use of Object.assign() to clone
+         * the resultset. As such, the returned object is not a CSSStyleDeclaration anymore and does not contain
+         * functions like getPropertyValue, getPropertyPriority, length property, numeric keys etc...
+         * It is then a simple object literal whose keys are the css key rule and values the css values.
+         * The exception is the preservation of the cssText property.
+         * Note that on Firefox, the resulset was derived from a CSS2Properties instead of CSSStyleDeclaration, and as
+         * such does not provide a usable cssText: we thus remove it.
+         *
+         * @param {Element} elt
+         * @returns {Object}
+         */
+        getVisibleComputedStyle: function (elt) {
+            var savedDisplayNone = [],
+                savedIdx = 0, cur, prop,
+                overridenStyles = {
+                    display: "block",
+                    position: "absolute",
+                    opacity: 0,
+                    top: "-999999px"
+                },
+                visibleComputedStyle
+            ;
+
+            for (cur = elt; cur !== null; cur = cur.parentNode) {
+                if (cur.nodeType === 1 && window.getComputedStyle(cur).display === "none") {
+                    savedDisplayNone.push({
+                        elm: cur,
+                        inlineStyle: {}
+                    });
+                    for (prop in overridenStyles) {
+                        if (cur.style[prop]) {
+                            savedDisplayNone[savedIdx].inlineStyle[prop] = cur.style[prop];
+                        }
+                        cur.style.setProperty(prop, overridenStyles[prop], "important");
+                    }
+                    savedIdx++;
+                }
+            }
+            visibleComputedStyle = window.getComputedStyle(elt);
+
+            // we shallow copy to make sure the styles remain unchanged if the DOM changes.
+            // Object.assign removes:
+            //   - properties with values undefined|null (ex: src: "")
+            //   - inherited properties (hasOwnProperty() is false) (ex: cssText, length)
+            //   - non-enumerable properties (propertyIsEnumerable() is false) (ex: 0: animation-delay)
+            // This results in a trim CSSStyleDeclaration (or CSS2Properties on Firefox)
+            visibleComputedStyle = Object.assign({
+                cssText: visibleComputedStyle.cssText, // keep cssText in case is present
+            }, visibleComputedStyle);
+
+            if (visibleComputedStyle.cssText === "") { // Firefox
+                delete visibleComputedStyle.cssText;
+            }
+
+            // restore modified properties
+            savedDisplayNone.forEach(function (saved) {
+                for (prop in overridenStyles) {
+                    saved.elm.style.removeProperty(prop);
+                }
+                for (prop in saved.inlineStyle) {
+                    saved.elm.style[prop] = saved.inlineStyle[prop];
+                }
+            });
+
+            return visibleComputedStyle;
         },
 
 
@@ -118,8 +203,7 @@
         getStyleAttributes: function (selector, sheet) {
             sheet = sheet || {};
             var styleMatchMap = {},
-                cssRules = sheet.cssRules || [],
-                cssStyleDeclaration = this.getStyleDeclaration(selector, sheet),
+                cssStyleDeclaration = this.getRawStyleDeclaration(selector, sheet),
                 styleAttributes
             ;
 
@@ -145,7 +229,7 @@
          * @param sheet {Stylesheet} the sheet where to search the selector
          * @returns {CSSStyleDeclaration} if the selector exists, null otherwise
          */
-        getStyleDeclaration: function (selector, sheet) {
+        getRawStyleDeclaration: function (selector, sheet) {
             var cssRules = sheet.cssRules || [];
 
             for (var x = 0; x < cssRules.length; x++) {
@@ -158,18 +242,18 @@
         },
 
         /**
-         * Add a css rule in the specified stylesheet or "inert stylesheet" if not stylesheet provided
+         * Add a css rule from raw string parameters in the specified stylesheet or "inert stylesheet" if no stylesheet provided.
          * @param {String} selector - the selector rule to add, ex: ".foo"
          * @param {String} body - the body of the rule to add, ex: "margin-right: 15px; display: inline-block"
          * @param {Stylesheet} (Optional) sheet - the stylesheet where we want to add the rule, uses inert stylesheet by default
          * @returns {CSSStyleDeclaration} a reference to the style object we added
          */
-        addCSSRule: function (selector, body, sheet) {
+        addRawCSSRule: function (selector, body, sheet) {
             var styleDeclaration;
 
             sheet = sheet || this.getInertSheet();
 
-            styleDeclaration = this.getStyleDeclaration(selector, sheet);
+            styleDeclaration = this.getRawStyleDeclaration(selector, sheet);
             if (styleDeclaration !== null) { // already exists
                 return styleDeclaration;
             }
@@ -185,14 +269,23 @@
 
 
         /**
+         * Add a css rule from CSSStyleDeclaration|CSS2Properties parameter in the specified stylesheet
+         * or "inert stylesheet" if no stylesheet provided.
+         * @param {String} selector - the selector rule to add, ex ".foo"
+         * @param {CSSStyleDeclaration|CSS2Properties} data
+         */
+        addCSSRule: function (selector, data) {
+            this.addRawCSSRule(selector, this.getCssTextFromStyle(data));
+        },
+
+        /**
          * Make an element "inert" aka totally invisible in the DOM.
          * @param {HTMLElement} elt - the DOM node we want to make inert
-         * @returns {Object} an objet holding all the original styles of arg elt that were overriden to make it inert
+         * @returns {Object} (Optional) an objet holding all the original styles of arg elt that were overriden to make it inert
          */
-        makeInert: function (elt) {
+        makeInert: function (elt, affectedStyles) {
             var defaults = window.getComputedStyle(elt),
-                inertStyle = this.getStyleAttributes('.inert', this.getInertSheet()),
-                overridenByInertStyles = {}
+                inertStyle = this.getStyleAttributes('.inert', this.getInertSheet())
             ;
 
             // save all default styles we will override by the .inert rule
@@ -206,7 +299,9 @@
                     prop = prop.replace(/-([a-z])/g, function(str,letter) {
                         return letter.toUpperCase();
                     });
-                    overridenByInertStyles[prop] = defaults[prop] || "initial";
+                    if (affectedStyles) {
+                        affectedStyles[prop] = defaults[prop] || "initial";
+                    }
                 }
             }
 
@@ -214,8 +309,6 @@
             elt.setAttribute("tabindex", "-1"); // prevent focusable/tabbable
 
             elt.classList.add("inert");
-
-            return overridenByInertStyles;
         },
 
         /**
@@ -225,6 +318,6 @@
         unmakeInert: function (elt) {
             elt.classList.remove("inert");
             elt.setAttribute("tabindex", elt.dataset.tabindex);
-        }
+        },
     };
 }));

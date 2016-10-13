@@ -149,6 +149,8 @@
                 originalElement: target
             };
 
+            var styles = this._getStyleFutureInput($target);
+
             // We turn the target into our fake input, inheriting all attributes/properties currently assigned inline on
             // the element(whatever the type of the element).
             // Note: this is does not preserve attached event handlers! there is no way to find them in pure javascript!
@@ -161,7 +163,7 @@
 
             $target.data(this.propertyName, inst);
 
-            this._impersonateInputStyle($target); // do this before adding child textnode!
+            this._impersonateInputStyle($target, styles); // do this before adding child textnode!
 
             $target.attr("tabindex", "1") // make it focusable/tabbable
                 .html("<div class='" + this.markerClassName + "-mask" + "'>" + // block wrapper
@@ -276,93 +278,59 @@
 
 
         /**
+         * Calculate style to apply to the future fake input.
+         *
+         * @param {jQuery} $target - the fake jquery input
+         * @returns {{ css prop: {String}, css value: {String} }}
+         * @private
+         */
+        _getStyleFutureInput: function ($target) {
+            var $input,
+                target = $target[0],
+                stylesToRestore = {},
+                visibleComputedStyle
+            ;
+
+            if (selectorAPI.jquery.is.call($target, "input[type='text'")) {
+                $input = $target;
+                visibleComputedStyle = StyleHelper.getVisibleComputedStyle($input[0]);
+            } else {
+                $input = $(target.outerHTML.replace(target.tagName.toLowerCase(), "input")).removeAttr("id");
+                StyleHelper.makeInert($input, stylesToRestore);
+                $target.after($input);
+                visibleComputedStyle = StyleHelper.getVisibleComputedStyle($input[0]);
+                $input.remove();
+
+                for (var prop in stylesToRestore) { // override styles
+                    if (stylesToRestore.hasOwnProperty(prop)) {
+                        visibleComputedStyle[prop] = stylesToRestore[prop];
+                    }
+                }
+            }
+            return visibleComputedStyle;
+        },
+
+
+        /**
          * Impersonate the styles of a real input text in the context of its parent.
          *
          * @param {jQuery} $target - the fake jquery input
          * @private
          */
-        _impersonateInputStyle: function ($target) {
-            var stylesToRestore,
-                target = $target[0],
-                $doppleganger,
-                doppleganger,
-                dopplegangerStyle,
-                markerClassDoppleganger = this.markerClassName + "-doppleganger",
-                // use original selector API as we filter ".inert" from the result set in our custom ones
-                $previousDoppleGanger = $(selectorAPI.native.querySelector.call(document, '.' + markerClassDoppleganger)),
-                // this counter allows us to create a unique css rule each time
-                styleIncr = $previousDoppleGanger.length ? $previousDoppleGanger.data("incr") : 0
+        _impersonateInputStyle: function ($target, computedStyle) {
+            var target = $target[0],
+                nextCount = $('.' + this.markerClassName).length + 1
             ;
 
-            if ($previousDoppleGanger.parent()[0] === $target.parent()[0]) { // same style already defined
-                $target.addClass(this.markerClassName + ' ' + this.markerClassName + '-' + styleIncr);
-                return;
-            }
-
-            styleIncr++;
-
-            $previousDoppleGanger.remove(); // we will create a new one so this one won't be needed anymore
-
-            // create a real input doppleganger from the target
-            // (Note: this is redundant if the target was already an input)
-            $doppleganger = $(target.outerHTML.replace(target.tagName.toLowerCase(), "input"))
-                .removeAttr("id")
-                .addClass(markerClassDoppleganger);
-
-            doppleganger = $doppleganger[0];
-
-            $doppleganger.data("incr", styleIncr); // save current incrementation
-            $realInputProxy = $doppleganger; // whenever a real input proxy will be needed for validation, we can use this one
-
-            var adjustedCss = [];
-            for (var cur = target, $cur = $target; cur !== null; cur = target.parentNode) {
-                if ($cur.css("display") === "none") {
-                    adjustedCss.push({
-                        elm: cur,
-                        style: {
-                            position: $cur.css("position"),
-                            opacity: $cur.css("opacity"),
-                            top: $cur.css("top")
-                        }
-                    });
-                    $cur.css({
-                        position: "absolute",
-                        opacity: 0,
-                        top: -99999
-                    });
-                }
-            }
-
-            // insert a real input with the same parent so we can retrieve all its calculated styles
-            stylesToRestore = StyleHelper.makeInert(doppleganger);
-            $target.after($doppleganger);
 
             // Save a new CSS class rule based on the calculated style.
             // This is convenient instead of inline styling because:
             //  - we can simply toggle the class on future fake inputs
             //  - it keeps the code DRY as the styles are not repeated inline
             //  - it doesn't bloat the DOM inspector with very long lines of inline styles
-            dopplegangerStyle = StyleHelper.addCSSRule('.' + this.markerClassName + '-' + styleIncr,
-                StyleHelper.getComputedStyleCssText(doppleganger));
+            StyleHelper.addCSSRule('.' + this.markerClassName + '-' + nextCount, computedStyle);
 
-            adjustedCss.forEach(function (saved) {
-                $(saved.elm).css({
-                    position: saved.style.position,
-                    opacity: saved.style.opacity,
-                    top: saved.style.top
-                });
-                stylesToRestore.position = saved.style.position;
-                stylesToRestore.opacity = saved.style.opacity;
-                stylesToRestore.top = saved.style.top;
-            });
-
-            for (var prop in stylesToRestore) { // override styles
-                if (stylesToRestore.hasOwnProperty(prop)) {
-                    dopplegangerStyle[prop] = stylesToRestore[prop];
-                }
-            }
-
-            $target.addClass(this.markerClassName + ' ' + this.markerClassName + '-' + styleIncr);
+            $target.addClass(this.markerClassName + ' ' + this.markerClassName + '-' + nextCount);
         },
 
 
@@ -1162,6 +1130,12 @@
                 markerUsesValidation = this.markerClassName + "-uses-validation"
             ;
 
+            if (!$realInputProxy.length) {
+                $realInputProxy = $("<input type='text' class='" + this.markerClassName + "-proxy" + "'>");
+                StyleHelper.makeInert($realInputProxy[0]);
+                $("body").append($realInputProxy);
+            }
+
             if (!$target.hasClass(markerUsesValidation)) {
                 // Impersonate native validation API properties
                 Object.defineProperties(target, {
@@ -1185,8 +1159,7 @@
 
                 // implement checkValidity
                 target.checkValidity = function () {
-                    var invalidEvent,
-                        isValid = plugin._queryValidation.call(null, $target, $realInputProxy, "checkValidity");
+                    var isValid = plugin._queryValidation.call(null, $target, $realInputProxy, "checkValidity");
 
                     if (!isValid) {
                         plugin._fireInvalidEvent($target);
@@ -1197,8 +1170,6 @@
 
                 // implement setCustomValidity
                 target.setCustomValidity = function (message) {
-                    var hasMessage = message.length;
-
                     plugin._queryValidation.call(null, $target, $realInputProxy, "setCustomValidity", message);
 
                     plugin._toggleValidityClasses(message.length === 0);
