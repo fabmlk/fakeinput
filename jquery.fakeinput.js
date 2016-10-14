@@ -25,16 +25,17 @@
         // AMD. Register as an anonymous module.
         define([
             "jquery",
-            "./stylehelper.js"
+            "stylehelper",
+            "selectorspy"
         ], factory);
     } else if (typeof module === 'object' && module.exports) {
         // Node/CommonJS
-        module.exports = factory(require("jquery"), require("./stylehelper.js"));
+        module.exports = factory(require("jquery"), require("stylehelper"), require("selectorspy"));
     } else {
         // Browser globals
-        factory(jQuery, StyleHelper);
+        factory(jQuery, StyleHelper, SelectorSpy);
     }
-}(function ($, StyleHelper) {
+}(function ($, StyleHelper, SelectorSpy) {
 
     var getters = []; // list of getter methods (none for the moment)
 
@@ -47,25 +48,6 @@
         htmlProps: ["required", "novalidate", "formnovalidate"],
         oAttrs: ["validationMessage", "willValidate", "validity"],
         fns: ["checkValidity", "setCustomValidity"]
-    };
-
-    var selectorAPI = { // save original selector APIs
-        native: {
-            querySelector: document.querySelector,
-            querySelectorAll: document.querySelectorAll,
-            matches: document.documentElement.matches
-        },
-
-        // jquery selector functions
-        // TODO: provide an extension API to allow the user to define its own
-        // overrides in order to handle any kind of third-party selector APIs
-        jquery: {
-            filter: $.fn.filter,
-            find: $.fn.find,
-            not: $.fn.not,
-            is: $.fn.is,
-            sizzle: $.find
-        }
     };
 
     // simple events manager for plain-js/non-jquery events
@@ -319,7 +301,7 @@
                 visibleComputedStyle
             ;
 
-            if (selectorAPI.jquery.is.call($target, "input[type='text']")) { // is our element already a real input text?
+            if ((SelectorSpy.retreive($.fn, "is") || $.fn.is).call($target, "input[type='text']")) { // is our element already a real input text?
                 $input = $target;
                 visibleComputedStyle = StyleHelper.getVisibleComputedStyle($input[0]);
             } else { // we create a fake input in the context of its parent
@@ -343,6 +325,7 @@
          * Impersonate the styles of a real input text in the context of its parent.
          *
          * @param {jQuery} $target - the fake jquery input
+         * @param {CSSStyleDeclaration|CSS2Properties|Object} see Stylehelper.getVisibleComputedStyle
          * @private
          */
         _impersonateInputStyle: function ($target, computedStyle) {
@@ -422,16 +405,16 @@
          * can remain mostly unchanged if we ever change this again).
          *
          * @param {jQuery} $target - the fake jquery input
-         * @returns {top: number, left: number} - the top-left coordinate of the caret
+         * @returns {{top: number, left: number}} - the top-left coordinate of the caret
          * @private
          */
         _getRelativeCaretCoordinates: function ($target) {
             var target = $target[0],
                 $fakeTextNode = this._getTextNode($target),
                 realTextNode = $fakeTextNode[0].childNodes[0],
-                currentShift = parseFloat($fakeTextNode.css("left"), 0),
+                currentShift = parseFloat($fakeTextNode.css("left")),
                 range = document.createRange(),
-                rangeRect
+                left, rangeRect
             ;
 
             range.setStart(realTextNode, 0);
@@ -458,8 +441,7 @@
          * @private
          */
         _getBoundedCaretCoordinates: function ($target) {
-            var target = $target[0],
-                caretCoords = this._getRelativeCaretCoordinates($target),
+            var caretCoords = this._getRelativeCaretCoordinates($target),
                 wrapperWidth = $target.children().width()
             ;
 
@@ -540,7 +522,7 @@
          *   - deleted a portion of the text
          *   - pressed the left arrow key at the far left end of the fake input
          *
-         * @param {jQuery] $target - the fake jquery input
+         * @param {jQuery} $target - the fake jquery input
          * @param {Number} value - the number of pixels to shift
          * @private
          */
@@ -818,9 +800,7 @@
          * @private
          */
         _handleValueChanged: function ($target) {
-            var target = $target[0],
-                isValid
-            ;
+            var target = $target[0];
 
             if (this._optionPlugin(target, "fireInput") === true) {
                 this._fireInputEvent($target);
@@ -923,9 +903,7 @@
          * @private
          */
         _initEvents: function ($target) {
-            var target = $target[0],
-                fakeTextNode = this._getTextNode($target)[0]
-            ;
+            var target = $target[0];
 
             // we don't use jquery events to have total controls in case it gets tricky...
             // Because of this we have to keep track of the event handlers to be able to remove them later with removeEventListener().
@@ -1032,41 +1010,48 @@
          * @returns {*} the result of the native call
          * @private
          */
-        _querySelector: function (extensionName, fnName, selector, otherArgs) {
-            var match,
+        _querySelector: function (context, native, selector, jqNot, otherArgs) {
+            var match, modifiedSelector,
                 markerUsesNativeSelector = plugin.markerClassName + "-uses-native-selector",
+                otherArgs = otherArgs || [],
 
                 // instead of doing any kind of parsing on the selector to detect if the input tag is present
                 // we execute a dummy replace with the plugin class name and catch the error thrown
                 // if this switch formed a invalid selector (for instance if the word "plugin" is not a tag name
-                // in the selector but part of something else like .input, #input, .myinputName, etc.)
+                // in the selector but part of something else like .input, #input, .myinputName, etc.).
+                // We detect the presence of "input" tag in the selector by also discarding if it is preceded by
+                // an alphanumeric char: this is because we don't want to match fooinput or our own fab-fakeinput.
+                // It should work as real input tags can never be preceded by other than nothing, space or "(" when
+                // used inside a function selector like :not().
                 //
                 // Note validation API selectors: it exists other selectors like :in-range or :out-of-range related to the validation
                 // when attributes min & max are provided on an input of type number. But as we only handle type='text', those
                 // should not be treated.
-                modifiedSelector = selector.replace(/input|:invalid|:valid|:required/g, function (match) {
-                    if (match === "input") {
-                        return "." + markerUsesNativeSelector;
+                modifiedSelector = selector.replace(/(^| |\()input|:invalid|:valid|:required/g, function (match, p1) {
+                    if (match === p1 + "input") {
+                        return p1 + "." + markerUsesNativeSelector;
                     }
 
                     // return the class postfixed with the validation pseudo-class (without the ':') => -invalid, -valid or -required
                     // Note: this is of no consequences if the user set the option integrateValidations to false.
-                    return "." + markerUsesNativeSelector + "." + plugin.markerClassName + "-" + match.substring(1);
-                });
+                    return p1 + "." + markerUsesNativeSelector + "." + plugin.markerClassName + "-" + match.substring(1);
+                })
             ;
 
             try {
                 if (modifiedSelector !== selector) {
-                    match = selectorAPI[extensionName][fnName].call(this, modifiedSelector + ", " + selector, otherArgs);
+
+                    match = native([modifiedSelector + ", " + selector].concat(otherArgs), context, [$, "find"]);
                     if (match !== null) {
                         // remove .inert elements from the set
-                        return selectorAPI.jquery.not.call($(match), '.inert');
+                        return jqNot.call($(match), '.inert');
                     }
                 }
-            } catch(e) {};
+            } catch(e) {}
 
-            return selectorAPI[extensionName][fnName].call(this, selector, otherArgs);
+            return native([selector].concat(otherArgs), context);
         },
+
 
         /**
          * Overrides the selector API to match the fake inputs when the input tag is present in a selector.
@@ -1074,46 +1059,65 @@
          */
         _impersonateInputSelectors: function ($target) {
             var target = $target[0],
-                jqFnNames = ["is", "find", "filter", "not", "sizzle"],
+                jqNot = $.fn.not,
                 markerUsesNativeSelector = this.markerClassName + "-uses-native-selector"
             ;
 
+
             $target.addClass(markerUsesNativeSelector);
 
-            // As .matches is called on an element, we need to capture the context as well on this one
-            target.matches = function (selector) {
-                return plugin._querySelector.call(this, "native", "matches", selector);
-            };
-
-            if (selectorAPI.initialized === true) { // global selectors already initialized
-                return;
-            }
-
-            document.querySelector = plugin._querySelector.bind(document, "native", "querySelector");
-
-            document.querySelectorAll = plugin._querySelector.bind(document, "native", "querySelectorAll");
-
-            // We need to override jquery selector methods too. Even though they make use of
-            // native API under the hood, the Sizzle engine actually saves references to the
-            // native functions before our override code even run!
-            jqFnNames.forEach(function (name) {
-                var jqFn = selectorAPI.jquery[name];
-
-                // Those jquery selector functions are also called from inside jQuery code,
-                // meaning the context can change between $.fn and window.
-                // So we also need to capture the context of the current call.
-                selectorAPI.jquery[name] = jqFn = function (selector) {
-                    var args = Array.prototype.slice.call(arguments);
-
-                    // jquery support other type of arguments (jquery object, html element etc...) we don't want to override
-                    if (typeof selector === "string") {
-                        return plugin._querySelector.call(this, "jquery", name, selector, args.slice(1));
-                    }
-                    return selectorAPI.jquery[name].call(this, selector, args.slice(1));
+            SelectorSpy.spy(document, "querySelector", function (native) {
+                return function (selector) {
+                    return plugin._querySelector(null, native, selector, jqNot);
                 };
             });
 
-            selectorAPI.initialized = true; // mark as already initialized
+            SelectorSpy.spy(document, "querySelectorAll", function (native) {
+                return function (selector) {
+                    return plugin._querySelector(null, native, selector, jqNot);
+                };
+            });
+
+            SelectorSpy.spy(target, "matches", function (native) {
+                return function (selector) {
+                    return plugin._querySelector(null, native, selector, jqNot);
+                };
+            });
+
+            SelectorSpy.spy($.fn, "not", function (native) {
+                return function (selector) {
+                    return plugin._querySelector(this, native, selector, jqNot);
+                };
+            });
+
+            SelectorSpy.spy($.fn, "find", function (native) {
+                return function (selector) {
+                    return plugin._querySelector(this, native, selector, jqNot);
+                };
+            });
+
+            SelectorSpy.spy($.fn, "filter", function (native) {
+                return function (selector) {
+                    return plugin._querySelector(this, native, selector, jqNot);
+                };
+            });
+
+            SelectorSpy.spy($.fn, "is", function (native) {
+                return function (selector) {
+                    return plugin._querySelector(this, native, selector, jqNot);
+                };
+            });
+
+            // Support for intercepting event delegation
+            SelectorSpy.spy($, "find", function (native) {
+                var Sizzle = function (selector, context, results) {
+                    return plugin._querySelector(this, native, selector, jqNot, [selector, context, results]);
+                };
+
+                $.extend(Sizzle, $.find);
+
+                return Sizzle;
+            });
         },
 
         /**
@@ -1125,10 +1129,11 @@
          */
         _stopSelectorsImpersonation: function ($target) {
             $target.removeClass(this.markerClassName + "-uses-native-selector");
-            $target[0].matches = selectorAPI.native.matches;
+
+            SelectorSpy.unspy($target[0], "matches");
 
             if (!$(this.markerClassName).length) { // no remaining fake inputs
-                selectorAPI.initialized = false;
+                SelectorSpy.unspyAll();
             }
         },
 
@@ -1330,6 +1335,7 @@
          *
          * @param {jQuery} $target - the fake jquery input
          * @param {String} name - the name of the validation property to retrieve
+         * @param {jQuery} $input - a real input
          * @returns {*} the retrieved property
          * @private
          */
@@ -1423,9 +1429,7 @@
          */
         _destroyPlugin: function (target) {
             var $target = $(target),
-                fakeTextNode = this._getTextNode($target)[0],
-                inst = $target.data(this.propertyName),
-                eventName
+                inst = $target.data(this.propertyName)
             ;
 
             if (!$target.hasClass(this.markerClassName)) { // if plugin not initialized
@@ -1435,13 +1439,10 @@
             this._stopSelectorsImpersonation($target);
             this._stopValidationsImpersonation($target);
 
-            $target.find("*").addBack().each(function () {
+            $target.find("*").addBack().each(function () { // remove all non-jquery listeners attached to the element
                 eventListenerManager.removeListeners(this);
             });
 
-            // we replace the element without first removing its native (non-jquery) event listeners.
-            // We want to remove them manually to avoid any memory leaks issues but instead of keeping tracks
-            // of which element has which listeners, we will simply destroy them all when not more fake inputs are remaining.
             $target.replaceWith(inst.originalElement); // jquery removes its own events listeners + data (also on children aka fake text node)
 
             if ($(this.markerClassName).length === 0) { // no remaining fake inputs
