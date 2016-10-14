@@ -63,35 +63,46 @@
             filter: $.fn.filter,
             find: $.fn.find,
             not: $.fn.not,
-            is: $.fn.is
+            is: $.fn.is,
+            sizzle: $.find
         }
     };
 
-    // we keep tracks of event listeners added via direct calls to addEventListener()
-    // Note: current status is we only add one listener per event, but we still use arrays in case this changes later.
-    var fakeTextNodeEventListeners = {
-        mousedown: [],
-        click: [],
-        mouseup: [],
-        dblclick: [],
-        mousemove: [],
-        mouseover: [],
-        mouseout: [],
-        mousewheel: [],
-        touchstart: [],
-        touchend: [],
-        touchcancel: []
-    };
+    // simple events manager for plain-js/non-jquery events
+    var eventListenerManager = {
+        childEvents: ["mousedown", "click", "mouseup", "dblclick", "mousemove", "mouseover", "mouseout", "mousewheel",
+            "touchstart", "touchend", "touchcancel"], // all child of a fake input will intercept those events
 
-    var fakeInputEventListeners = {
-        mousedown: [],
-        blur: [],
-        focus: [],
-        keypress: [],
-        keydown: [],
-        mouseup: []
-    };
+        listeners: [], // listeners stack
 
+        addListener: function (event, elem, listener) {
+            this.listeners.unshift({
+                event: event,
+                elem: elem,
+                listener: listener
+            });
+            elem.addEventListener(event, listener);
+        },
+
+        removeAllListeners: function () {
+            this.listeners.forEach(function (saved) {
+                saved.elem.removeEventListener(saved.event, saved.listener);
+            });
+            this.listeners = [];
+        },
+
+        removeListeners: function (elem) {
+            var remaining = [];
+            this.listeners.forEach(function (saved) {
+                if (saved.elem === elem) {
+                    elem.removeEventListener(saved.event, saved.listener);
+                } else {
+                    remaining.push(saved);
+                }
+            });
+            this.listeners = remaining;
+        }
+    };
 
 
     function FakeInput() {
@@ -163,9 +174,6 @@
             };
 
             inputStyles = this._getStyleFutureInput($target);
-            (options.ignoredStyleProperties || []).forEach(function (prop) {
-                StyleHelper.removeProp(inputStyles, prop);
-            });
 
             // We turn the target into our fake input, inheriting all attributes/properties currently assigned inline on
             // the element(whatever the type of the element).
@@ -230,6 +238,10 @@
             $.extend(inst.options, options); // update with new options
 
             /* end of boilerplate code */
+
+            inst.options.ignoredStyleProperties.forEach(function (prop) {
+                StyleHelper.removeProp($target.attr("class").match(new RegExp(plugin.markerClassName + "-\d+")), prop);
+            });
 
             if (inst.options.integrateSelectors === true) {
                 $target.attr("type", "text"); // force type text
@@ -307,7 +319,7 @@
                 visibleComputedStyle
             ;
 
-            if (selectorAPI.jquery.is.call($target, "input[type='text'")) { // is our element already a real input text?
+            if (selectorAPI.jquery.is.call($target, "input[type='text']")) { // is our element already a real input text?
                 $input = $target;
                 visibleComputedStyle = StyleHelper.getVisibleComputedStyle($input[0]);
             } else { // we create a fake input in the context of its parent
@@ -334,9 +346,7 @@
          * @private
          */
         _impersonateInputStyle: function ($target, computedStyle) {
-            var target = $target[0],
-                nextCount = $('.' + this.markerClassName).length + 1
-            ;
+            var nextCount = $('.' + this.markerClassName).length + 1;
 
 
             // Save a new CSS class rule based on the calculated style.
@@ -370,6 +380,9 @@
                 set: function (val) {
                     var currentVal = $fakeTextNode.text();
                     $fakeTextNode.text(val);
+                    if (!val) { // empty string, undefined, null...
+                        plugin._initTextNode($target); // re-create the text node!
+                    }
                     if (val != currentVal) {
                         plugin._handleValueChanged($target);
                     }
@@ -607,9 +620,6 @@
                 target.value = value.slice(0, selStart) + value.slice(selEnd);
                 target.selectionStart = target.selectionEnd = selStart;
             }
-            if (target.selectionStart === 0) {
-                this._initTextNode($target); // re-create the text node!
-            }
 
             this._shiftTextNodeRight($target, Math.floor(deletedTextWidth));
         },
@@ -763,7 +773,8 @@
         _handleMousedown: function ($target, e) {
             var range, caretPosition, offset,
                 target = $target[0],
-                realTextNode = this._getTextNode($target)[0].childNodes[0],
+                $fakeTextNode = this._getTextNode($target),
+                realTextNode = $fakeTextNode[0].childNodes[0],
                 selection = window.getSelection()
             ;
 
@@ -772,23 +783,28 @@
                 selection.collapseToStart();
             }
 
-            if (document.caretPositionFromPoint) { // current standard, Firefox only
-                caretPosition = document.caretPositionFromPoint(e.clientX, e.clientY);
+            if (e.clientX >= $fakeTextNode.width()) { // pointer was beyond the text node, in blank space
+                offset = realTextNode.nodeValue.length;
+            } else { // pointer was somewhere inside...
 
-                if (caretPosition.offsetNode !== realTextNode) {
-                    range = document.createRange();
-                    range.setStart(realTextNode, 0);
+                if (document.caretPositionFromPoint) { // current standard, Firefox only
+                    caretPosition = document.caretPositionFromPoint(e.clientX, e.clientY);
+
+                    if (caretPosition.offsetNode !== realTextNode) {
+                        range = document.createRange();
+                        range.setStart(realTextNode, 0);
+                        offset = range.startOffset;
+                    } else {
+                        offset = caretPosition.offset;
+                    }
+
+                } else if (document.caretRangeFromPoint) { // old standard, others
+                    range = document.caretRangeFromPoint(e.clientX, e.clientY);
+                    if (range.startContainer !== realTextNode) {
+                        range.setStart(realTextNode, 0);
+                    }
                     offset = range.startOffset;
-                } else {
-                    offset = caretPosition.offset;
                 }
-
-            } else if (document.caretRangeFromPoint) { // old standard, others
-                range = document.caretRangeFromPoint(e.clientX, e.clientY);
-                if (range.startContainer !== realTextNode) {
-                    range.setStart(realTextNode, 0);
-                }
-                offset = range.startOffset;
             }
 
             target.selectionStart = target.selectionEnd = offset;
@@ -915,20 +931,20 @@
             // Because of this we have to keep track of the event handlers to be able to remove them later with removeEventListener().
             // (We want to do this as to avoid any potential memory leaks)
 
-            // We want to hide the fact we have a fake inner text node on mouse & touch events
+            // We want to hide the fact that a fake input has children from mouse & touch events
             // (for now we don't care about other events).
-            // As the inner text node takes up the whole fake input area, it will be the one
-            // actually receiving the actual event. As such when it bubbles, its "target" attribute
-            // will indicate the origin comes from the text node instead of the fake input, breaking the client
-            // code that assumes that e.target == fake input (real inputs don't have children).
+            // As a fake input has children, they will be the ones actually receiving the actual event.
+            // As such when it bubbles, its "target" attribute will indicate the origin comes from a child node
+            // instead of the fake input, breaking the client code that assumes that e.target == fake input
+            // (real inputs don't have children).
             // As the "target" attribute is readonly and cannot ever be set/changed, the trick is to
-            // listen for the event directly on the fake inner text node, stop its propagation
+            // listen for the event directly on the children, stop its propagation
             // immediately, and trigger a newly created matching event on the fake input.
-
-            for (var eventName in fakeTextNodeEventListeners) {
-                fakeTextNodeEventListeners[eventName].unshift(plugin._impersonateTouchMouseEvent.bind(fakeTextNode, target));
-                fakeTextNode.addEventListener(eventName, fakeTextNodeEventListeners[eventName][0]);
-            };
+            eventListenerManager.childEvents.forEach(function (event) {
+                $target.find("*").each(function () {
+                    eventListenerManager.addListener(event, this, plugin._impersonateTouchMouseEvent.bind(this, target))
+                });
+            });
 
             // mousedown event on fake input will only occur from programmatically created event in the
             // fake inner text node (see above)
@@ -937,44 +953,40 @@
             // we make sure the range concerns the real text node. Other solution would be to catch the event on
             // the fake input and prevent the bubbling, but this solution can remain untouched if we change the
             // fake caret implementation (used to be one instance for every inputs).
-            fakeInputEventListeners["mousedown"].unshift(function (e) {
+            eventListenerManager.addListener("mousedown", target, function (e) {
                 plugin._handleMousedown($target, e);
 
                 plugin._showCaret($target);
                 console.log("mousedown");
             });
-            target.addEventListener("mousedown", fakeInputEventListeners.mousedown[0]);
 
 
             // focus & blur events are fired automatically by the browser as the fake inputs were made focusable
             // from adding tabindex
 
-            fakeInputEventListeners["focus"].unshift(function () {
+            eventListenerManager.addListener("focus", target, function () {
                 plugin._handleFocus($target);
                 plugin._showCaret($target);
                 console.log("focused");
             });
-            target.addEventListener("focus", fakeInputEventListeners.focus[0]);
 
-            fakeInputEventListeners["blur"].unshift(function () {
+            eventListenerManager.addListener("blur", target, function () {
                 plugin._handleBlur($target);
                 console.log("blurred");
             });
-            target.addEventListener("blur", fakeInputEventListeners.blur[0]);
 
             // Handling key events properly cross-browser is a pain in the ass.
             // For now we provide basic cross-browser support by taking into account that Chrome
             // does not fire keypress event when key is not printable (notable exceptions are Backspace or Enter)
             // but Firefox does.
-            fakeInputEventListeners["keypress"].unshift(function (e) {
+            eventListenerManager.addListener("keypress", target, function (e) {
                 if (e.which !== 13 && e.charCode !== 0) { // not "Enter" and printable key (simplified check for now...)
                     plugin._handleCharKey($target, e.key);
                     plugin._showCaret($target);
                 }
             });
-            target.addEventListener("keypress", fakeInputEventListeners.keypress[0]);
 
-            fakeInputEventListeners["keydown"].unshift(function (e) {
+            eventListenerManager.addListener("keydown", target, function (e) {
                 var selStart = this.selectionStart;
 
                 if (e.which === 8) { // backspace
@@ -997,19 +1009,17 @@
                     plugin._showCaret($target);
                 }
             });
-            target.addEventListener("keydown", fakeInputEventListeners.keydown[0]);
 
-            fakeInputEventListeners["mouseup"].unshift(function () {
+            eventListenerManager.addListener("mouseup", target, function () {
                 plugin._handleMouseup($target);
                 console.log("mouseup");
             });
-            target.addEventListener("mouseup", fakeInputEventListeners.mouseup[0]);
         },
 
 
         //////////////////////////////////////////////////////////////////////////////////
         //                                                                              //
-        //                    NATIVE SELECTORS INTEGRATION API                          //
+        //                           SELECTORS API INTEGRATION                          //
         //                                                                              //
         //////////////////////////////////////////////////////////////////////////////////
 
@@ -1022,7 +1032,7 @@
          * @returns {*} the result of the native call
          * @private
          */
-        _querySelector: function (extensionName, fnName, selector) {
+        _querySelector: function (extensionName, fnName, selector, otherArgs) {
             var match,
                 markerUsesNativeSelector = plugin.markerClassName + "-uses-native-selector",
 
@@ -1047,7 +1057,7 @@
 
             try {
                 if (modifiedSelector !== selector) {
-                    match = selectorAPI[extensionName][fnName].call(this, modifiedSelector + ", " + selector);
+                    match = selectorAPI[extensionName][fnName].call(this, modifiedSelector + ", " + selector, otherArgs);
                     if (match !== null) {
                         // remove .inert elements from the set
                         return selectorAPI.jquery.not.call($(match), '.inert');
@@ -1055,7 +1065,7 @@
                 }
             } catch(e) {};
 
-            return selectorAPI[extensionName][fnName].call(this, selector);
+            return selectorAPI[extensionName][fnName].call(this, selector, otherArgs);
         },
 
         /**
@@ -1064,7 +1074,7 @@
          */
         _impersonateInputSelectors: function ($target) {
             var target = $target[0],
-                jqFnNames = ["is", "find", "filter", "not"],
+                jqFnNames = ["is", "find", "filter", "not", "sizzle"],
                 markerUsesNativeSelector = this.markerClassName + "-uses-native-selector"
             ;
 
@@ -1087,16 +1097,19 @@
             // native API under the hood, the Sizzle engine actually saves references to the
             // native functions before our override code even run!
             jqFnNames.forEach(function (name) {
+                var jqFn = selectorAPI.jquery[name];
 
                 // Those jquery selector functions are also called from inside jQuery code,
                 // meaning the context can change between $.fn and window.
                 // So we also need to capture the context of the current call.
-                $.fn[name] = function (selector) {
+                selectorAPI.jquery[name] = jqFn = function (selector) {
+                    var args = Array.prototype.slice.call(arguments);
+
                     // jquery support other type of arguments (jquery object, html element etc...) we don't want to override
                     if (typeof selector === "string") {
-                        return plugin._querySelector.call(this, "jquery", name, selector);
+                        return plugin._querySelector.call(this, "jquery", name, selector, args.slice(1));
                     }
-                    return selectorAPI.jquery[name].call(this, selector);
+                    return selectorAPI.jquery[name].call(this, selector, args.slice(1));
                 };
             });
 
@@ -1394,7 +1407,7 @@
 
         //////////////////////////////////////////////////////////////////////////////////
         //                                                                              //
-        //                               DESTROY PLUGIN                                 //
+        //                              PLUGIN DESTRUCTION                              //
         //                                                                              //
         //////////////////////////////////////////////////////////////////////////////////
 
@@ -1422,19 +1435,17 @@
             this._stopSelectorsImpersonation($target);
             this._stopValidationsImpersonation($target);
 
+            $target.find("*").addBack().each(function () {
+                eventListenerManager.removeListeners(this);
+            });
+
             // we replace the element without first removing its native (non-jquery) event listeners.
             // We want to remove them manually to avoid any memory leaks issues but instead of keeping tracks
             // of which element has which listeners, we will simply destroy them all when not more fake inputs are remaining.
             $target.replaceWith(inst.originalElement); // jquery removes its own events listeners + data (also on children aka fake text node)
 
             if ($(this.markerClassName).length === 0) { // no remaining fake inputs
-                for (eventName in fakeTextNodeEventListeners) {
-                    fakeTextNode.removeEventListener(eventName, fakeTextNodeEventListeners[eventName].pop()); // note: pop is faster than shift
-                }
-
-                for (eventName in fakeInputEventListeners) {
-                    target.removeEventListener(eventName, fakeInputEventListeners[eventName].pop());
-                }
+                eventListenerManager.removeAllListeners();
 
                 $realInputProxy.remove();
                 $realInputProxy = $();

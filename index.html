@@ -5,8 +5,10 @@
     <title>Title</title>
     <script   src="https://code.jquery.com/jquery-2.2.4.js"   integrity="sha256-iT6Q9iMJYuQiMWNd9lDyBUStIq/8PuOW33aOqmvFpqI="   crossorigin="anonymous"></script>
     <script   src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"   integrity="sha256-T0Vest3yCU7pafRw9r+settMBX6JkKN06dqBnpQ8d30="   crossorigin="anonymous"></script>
-    <script src="jquery.minkeyboard.js"></script>
-    <script src="stylehelper.js"></script>
+    <script src="node_modules/jquery-minkeyboard/jquery.minkeyboard.js"></script>
+    <link rel="stylesheet" href="node_modules/jquery-minkeyboard/jquery.minkeyboard.css" />
+    <link rel="stylesheet" href="jquery.fakeinput.css" />
+    <script src="node_modules/stylehelper/stylehelper.js"></script>
     <script src="jquery.fakeinput.js"></script>
 
     <style>
@@ -14,9 +16,6 @@
             width: 200px;
         }
     </style>
-
-    <link rel="stylesheet" href="jquery.minkeyboard.css">
-    <link rel="stylesheet" href="jquery.fakeinput.css">
 
 </head>
 <body>
@@ -31,5 +30,10 @@
     </form>
     <!--<div class="hubert" id="whatever" required></div>-->
 some sample text
+<script>
+    $("body").on("click", "input", function (e) {
+        console.log("delegation", e);
+    });
+</script>
 </body>
 </html>
