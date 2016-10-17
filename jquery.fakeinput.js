@@ -39,7 +39,7 @@
 
     var styleCount = 0;
 
-    var getters = []; // list of getter methods (none for the moment)
+    var getters = ["focused"]; // list of getter methods (none for the moment)
 
     var $realInputProxy = $(); // only one input proxy instance for everyone
 
@@ -148,7 +148,8 @@
                 inputStyles
             ;
 
-            if ($target.hasClass(this.markerClassName)) { // already attached
+            if ($target.hasClass(this.markerClassName) || // already attached or the proxy input
+                $target.hasClass(this.markerClassName + "-proxy")) {
                 return;
             }
 
@@ -985,6 +986,17 @@
                 plugin._handleMouseup($target);
                 console.log("mouseup");
             });
+        },
+
+
+        /**
+         * Returns the currently focused input.
+         * Call it directly from the plugin namespace: $.fn.fakeinput("focused")
+         * @returns {Element|null}
+         * @private
+         */
+        _focusedPlugin: function () {
+            return currentlyFocus;
         },
 
 
