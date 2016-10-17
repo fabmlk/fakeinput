@@ -17,7 +17,7 @@
   },
   "homepage": "https://github.com/fabmlk/jquery-fakeinput#readme",
   "dependencies": {
-    "stylehelper": "https://github.com/fabmlk/stylehelper.git",
-    "selectorspy": "https://github.com/fabmlk/selectorspy.git"
+    "selectorspy": "https://github.com/fabmlk/selectorspy.git#bypass",
+    "stylehelper": "https://github.com/fabmlk/stylehelper.git"
   }
 }

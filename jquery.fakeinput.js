@@ -222,7 +222,7 @@
             /* end of boilerplate code */
 
             inst.options.ignoredStyleProperties.forEach(function (prop) {
-                StyleHelper.removeProp($target.attr("class").match(new RegExp(plugin.markerClassName + "-\d+")), prop);
+                StyleHelper.removeProp("." + $target.attr("class").match(new RegExp(plugin.markerClassName + "-\\d+"))[0], prop);
             });
 
             if (inst.options.integrateSelectors === true) {
@@ -393,6 +393,27 @@
                 target.dispatchEvent(blurEvent);
                 currentlyFocus = null;
             };
+
+            Object.defineProperty(target, "required", {
+                get: function () {
+                    return target._required;
+                },
+                set: function (bool) {
+                    target._required = bool;
+                    if (bool === true) {
+                        target.setAttribute("required", true);
+                        if (!target.value) {
+                            plugin._toggleValidityClasses($target, false);
+                        }
+                    } if (bool === false) {
+                        target.removeAttribute("required");
+                        plugin._toggleValidityClasses($target, target.value);
+                        if (target.value) {
+                            plugin._toggleValidityClasses($target, true);
+                        }
+                    }
+                }
+            });
 
             target.name = $target.attr("name"); // this breaks if the name is later set via .attr(), we could use getter instead
         },
@@ -1002,6 +1023,39 @@
         //////////////////////////////////////////////////////////////////////////////////
 
         /**
+         * Replaces all instances of a tagName in a selector by an impersonator.
+         * WARNING: This method uses non-public internal jQuery API to access the tokenize() method of the
+         * underlying Sizzle object (can be changed at anytime by jQuery/Sizzle team).
+         * Note: the internal tokenize caches all results so we don't need to think about it.
+         *
+         * @param {String} selector - the selector
+         * @param {String} tagName - the tag name to replace in the selector
+         * @param {String} impersonator - the stand-in for the tag names
+         * @returns {String} the new selector
+         * @private
+         */
+        _impersonateTagName: function (selector, tagName, impersonator) {
+            var ret = "";
+            var tokens = $.find.tokenize(selector);
+
+            for (var i = 0; i < tokens.length; i++) {
+                tokens[i].forEach(function (token) {
+                    if (token.type === "TAG" && token.value === tagName) {
+                        ret += impersonator;
+                    }  else if (token.type === "PSEUDO") {
+                        ret += ":" + token.matches[0] +
+                            (token.matches[1] ? // pseudo function, like :pseudo(...) => recursivity
+                            "(" + plugin._impersonateTagName(token.matches[1], tagName, impersonator) + ")" :
+                                ""); // simple pseudo, like :pseudo => nothing to add
+                    } else {
+                        ret += token.value;
+                    }
+                });
+            }
+            return ret;
+        },
+
+        /**
          * Performs a selector-based query against a native selector API function, gathering fake inputs elements
          * if an input tag selector is provided or validation API selectors like :invalid, :valid and :required.
          * @param {String} extensionName - name of a the extension of the selector API
@@ -1012,44 +1066,38 @@
          */
         _querySelector: function (context, native, selector, jqNot, otherArgs) {
             var match, modifiedSelector,
-                markerUsesNativeSelector = plugin.markerClassName + "-uses-native-selector",
+                altered = selector,
                 otherArgs = otherArgs || [],
-
-                // instead of doing any kind of parsing on the selector to detect if the input tag is present
-                // we execute a dummy replace with the plugin class name and catch the error thrown
-                // if this switch formed a invalid selector (for instance if the word "plugin" is not a tag name
-                // in the selector but part of something else like .input, #input, .myinputName, etc.).
-                // We detect the presence of "input" tag in the selector by also discarding if it is preceded by
-                // an alphanumeric char: this is because we don't want to match fooinput or our own fab-fakeinput.
-                // It should work as real input tags can never be preceded by other than nothing, space or "(" when
-                // used inside a function selector like :not().
-                //
-                // Note validation API selectors: it exists other selectors like :in-range or :out-of-range related to the validation
-                // when attributes min & max are provided on an input of type number. But as we only handle type='text', those
-                // should not be treated.
-                modifiedSelector = selector.replace(/(^| |\()input|:invalid|:valid|:required/g, function (match, p1) {
-                    if (match === p1 + "input") {
-                        return p1 + "." + markerUsesNativeSelector;
-                    }
-
-                    // return the class postfixed with the validation pseudo-class (without the ':') => -invalid, -valid or -required
-                    // Note: this is of no consequences if the user set the option integrateValidations to false.
-                    return p1 + "." + markerUsesNativeSelector + "." + plugin.markerClassName + "-" + match.substring(1);
-                })
+                markerUsesNativeSelector = plugin.markerClassName + "-uses-native-selector"
             ;
 
-            try {
-                if (modifiedSelector !== selector) {
 
-                    match = native([modifiedSelector + ", " + selector].concat(otherArgs), context, [$, "find"]);
+            if (selector.indexOf("input") > -1) {
+                altered = this._impersonateTagName(selector, "input", "." + markerUsesNativeSelector);
+            }
+
+            // Note validation API selectors: it exists other selectors like :in-range or :out-of-range related to the validation
+            // when attributes min & max are provided on an input of type number. But as we only handle type='text', those
+            // should not be treated.
+            altered = altered.replace(/:invalid|:valid|:required/g, function (match) {
+                // return the class postfixed with the validation pseudo-class (without the ':') => -invalid, -valid or -required
+                // Note: this is of no consequences if the user set the option integrateValidations to false.
+                return "." + markerUsesNativeSelector + "." + plugin.markerClassName + "-" + match.substring(1);
+            });
+
+            try {
+                if (altered !== selector) {
+
+                    match = native([altered + ", " + selector].concat(otherArgs), context);
                     if (match !== null) {
+                        return $(match).not(".inert");
                         // remove .inert elements from the set
-                        return jqNot.call($(match), '.inert');
+                        // return jqNot.call($(match), '.inert');
                     }
                 }
             } catch(e) {}
 
-            return native([selector].concat(otherArgs), context);
+            return $(native([selector].concat(otherArgs), context)).not(".inert");
         },
 
 
@@ -1058,66 +1106,50 @@
          * @private
          */
         _impersonateInputSelectors: function ($target) {
-            var target = $target[0],
-                jqNot = $.fn.not,
-                markerUsesNativeSelector = this.markerClassName + "-uses-native-selector"
+            var jqNot = $.fn.not,
+                markerUsesNativeSelector = this.markerClassName + "-uses-native-selector",
+                jqApi = ["not", "find", "filter", "is"]
             ;
 
 
             $target.addClass(markerUsesNativeSelector);
 
-            SelectorSpy.spy(document, "querySelector", function (native) {
+            SelectorSpy.spy(document, "querySelector", function (proxy) {
                 return function (selector) {
-                    return plugin._querySelector(null, native, selector, jqNot);
+                    return plugin._querySelector(null, proxy, selector, jqNot);
                 };
             });
 
-            SelectorSpy.spy(document, "querySelectorAll", function (native) {
+            SelectorSpy.spy(document, "querySelectorAll", function (proxy) {
                 return function (selector) {
-                    return plugin._querySelector(null, native, selector, jqNot);
+                    return plugin._querySelector(null, proxy, selector, jqNot);
                 };
             });
 
-            SelectorSpy.spy(target, "matches", function (native) {
+            SelectorSpy.spy($target[0], "matches", function (proxy) {
                 return function (selector) {
-                    return plugin._querySelector(null, native, selector, jqNot);
+                    return plugin._querySelector(null, proxy, selector, jqNot);
                 };
             });
 
-            SelectorSpy.spy($.fn, "not", function (native) {
-                return function (selector) {
-                    return plugin._querySelector(this, native, selector, jqNot);
-                };
-            });
-
-            SelectorSpy.spy($.fn, "find", function (native) {
-                return function (selector) {
-                    return plugin._querySelector(this, native, selector, jqNot);
-                };
-            });
-
-            SelectorSpy.spy($.fn, "filter", function (native) {
-                return function (selector) {
-                    return plugin._querySelector(this, native, selector, jqNot);
-                };
-            });
-
-            SelectorSpy.spy($.fn, "is", function (native) {
-                return function (selector) {
-                    return plugin._querySelector(this, native, selector, jqNot);
-                };
-            });
+            // jqApi.forEach(function (jqFn) {
+            //     SelectorSpy.spy($.fn, jqFn, function (proxy) {
+            //         return function (selector) {
+            //             return plugin._querySelector(this, proxy, selector);
+            //         };
+            //     });
+            // });
 
             // Support for intercepting event delegation
-            SelectorSpy.spy($, "find", function (native) {
-                var Sizzle = function (selector, context, results) {
-                    return plugin._querySelector(this, native, selector, jqNot, [selector, context, results]);
-                };
-
-                $.extend(Sizzle, $.find);
-
-                return Sizzle;
-            });
+            // SelectorSpy.spy($, "find", function (native) {
+            //     var Sizzle = function (selector, context, results) {
+            //         return plugin._querySelector(this, native, selector, jqNot, [selector, context, results]);
+            //     };
+            //
+            //     $.extend(Sizzle, $.find);
+            //
+            //     return Sizzle;
+            // });
         },
 
         /**
@@ -1129,8 +1161,6 @@
          */
         _stopSelectorsImpersonation: function ($target) {
             $target.removeClass(this.markerClassName + "-uses-native-selector");
-
-            SelectorSpy.unspy($target[0], "matches");
 
             if (!$(this.markerClassName).length) { // no remaining fake inputs
                 SelectorSpy.unspyAll();
@@ -1416,7 +1446,6 @@
         //                              PLUGIN DESTRUCTION                              //
         //                                                                              //
         //////////////////////////////////////////////////////////////////////////////////
-
 
         /**
          * Public method to destroy the plugin instance on the target element.
