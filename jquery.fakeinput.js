@@ -37,6 +37,8 @@
     }
 }(function ($, StyleHelper, SelectorSpy) {
 
+    var styleCount = 0;
+
     var getters = []; // list of getter methods (none for the moment)
 
     var $realInputProxy = $(); // only one input proxy instance for everyone
@@ -179,7 +181,6 @@
 
             $target._hasChanged = false; // we will use this to trigger change event if needed
 
-            this._initTextNode($target);
             this._impersonateInputAttributes($target);
             this._initEvents($target);
 
@@ -265,26 +266,19 @@
          * @private
          */
         _getTextNode: function ($target) {
-            return $target.children().children('.' + this.markerClassName + "-textnode");
-        },
-
-
-        /**
-         * Create a real text node as child of the fake text node if it doesn't have one yet
-         *
-         * @param $target - the fake jquery input
-         * @private
-         */
-        _initTextNode: function ($target) {
-            var $fakeTextNode = this._getTextNode($target),
+            var $fakeTextNode = $target.children().children('.' + this.markerClassName + "-textnode"),
                 realTextNode = $fakeTextNode[0].childNodes[0]
             ;
 
             if (realTextNode === undefined) {
                 realTextNode = document.createTextNode("");
                 $fakeTextNode.append(realTextNode);
+                $target[0].selectionStart = $target[0].selectionEnd = 0;
             }
+
+            return $fakeTextNode;
         },
+
 
 
         /**
@@ -329,17 +323,16 @@
          * @private
          */
         _impersonateInputStyle: function ($target, computedStyle) {
-            var nextCount = $('.' + this.markerClassName).length + 1;
-
+            styleCount++;
 
             // Save a new CSS class rule based on the calculated style.
             // This is convenient instead of inline styling because:
             //  - we can simply toggle the class on future fake inputs
             //  - it keeps the code DRY as the styles are not repeated inline
             //  - it doesn't bloat the DOM inspector with very long lines of inline styles
-            StyleHelper.addCSSRule('.' + this.markerClassName + '-' + nextCount, computedStyle);
+            StyleHelper.addCSSRule('.' + this.markerClassName + '-' + styleCount, computedStyle);
 
-            $target.addClass(this.markerClassName + ' ' + this.markerClassName + '-' + nextCount);
+            $target.addClass(this.markerClassName + ' ' + this.markerClassName + '-' + styleCount);
         },
 
 
@@ -363,11 +356,11 @@
                 set: function (val) {
                     var currentVal = $fakeTextNode.text();
                     $fakeTextNode.text(val);
-                    if (!val) { // empty string, undefined, null...
-                        plugin._initTextNode($target); // re-create the text node!
-                    }
                     if (val != currentVal) {
                         plugin._handleValueChanged($target);
+                    }
+                    if (!val) {
+                        target.selectionStart = target.selectionEnd = 0;
                     }
                 }
             });
@@ -393,27 +386,6 @@
                 target.dispatchEvent(blurEvent);
                 currentlyFocus = null;
             };
-
-            Object.defineProperty(target, "required", {
-                get: function () {
-                    return target._required;
-                },
-                set: function (bool) {
-                    target._required = bool;
-                    if (bool === true) {
-                        target.setAttribute("required", true);
-                        if (!target.value) {
-                            plugin._toggleValidityClasses($target, false);
-                        }
-                    } if (bool === false) {
-                        target.removeAttribute("required");
-                        plugin._toggleValidityClasses($target, target.value);
-                        if (target.value) {
-                            plugin._toggleValidityClasses($target, true);
-                        }
-                    }
-                }
-            });
 
             target.name = $target.attr("name"); // this breaks if the name is later set via .attr(), we could use getter instead
         },
@@ -1217,6 +1189,22 @@
                         get: function () {
                             return plugin._queryValidation($target, $realInputProxy, "willValidate");
                         }
+                    },
+                    required: {
+                        get: function () {
+                            return target._expando_required;
+                        },
+                        set: function (bool) {
+                            target._expando_required = bool;
+                            if (bool === true) {
+                                target.setAttribute("required", "required");
+                                plugin._toggleValidityClasses($target, !!target.value);
+                            }
+                            if (bool === false) {
+                                target.removeAttribute("required");
+                                plugin._toggleValidityClasses($target, true);
+                            }
+                        }
                     }
                 });
 
@@ -1458,7 +1446,8 @@
          */
         _destroyPlugin: function (target) {
             var $target = $(target),
-                inst = $target.data(this.propertyName)
+                inst = $target.data(this.propertyName),
+                currentVal = $target.val()
             ;
 
             if (!$target.hasClass(this.markerClassName)) { // if plugin not initialized
@@ -1473,6 +1462,7 @@
             });
 
             $target.replaceWith(inst.originalElement); // jquery removes its own events listeners + data (also on children aka fake text node)
+            $(inst.originalElement).val(currentVal);
 
             if ($(this.markerClassName).length === 0) { // no remaining fake inputs
                 eventListenerManager.removeAllListeners();
