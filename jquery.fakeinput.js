@@ -18,6 +18,7 @@
  * - selectionchange event (not yet supported by browsers)
  * - impersonation of CSS styles related to validation pseudo-classes (:invalid, :valid, :required...)
  * - impersonation of DOM Level 2 methods of element retreival (getElementById, getElementsByTagName, ....)
+ * - auto-focus from click on matching label
  */
 
 (function (factory) {
@@ -46,7 +47,7 @@
     var currentlyFocused = null; // will save the currently focus input
 
     var validationAPI = {
-        htmlAttrs:  ["type", "pattern", "maxlength", "min", "max"],
+        htmlAttrs:  ["type", "pattern", "minlength", "maxlength", "min", "max"],
         htmlProps: ["required", "novalidate", "formnovalidate"],
         oAttrs: ["validationMessage", "willValidate", "validity"],
         fns: ["checkValidity", "setCustomValidity"]
