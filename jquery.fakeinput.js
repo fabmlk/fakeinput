@@ -43,7 +43,7 @@
 
     var $realInputProxy = $(); // only one input proxy instance for everyone
 
-    var currentlyFocus = null; // will save the currently focus input
+    var currentlyFocused = null; // will save the currently focus input
 
     var validationAPI = {
         htmlAttrs:  ["type", "pattern", "maxlength", "min", "max"],
@@ -370,25 +370,21 @@
             target.selectionStart = target.selectionEnd = $fakeTextNode.text().length;
 
             target.focus = function () {
-                if (currentlyFocus) {
-                    currentlyFocus.blur(); // blur the previous one
-                }
-
                 // don't use jquery trigger as it will call .focus() => infinite loop!
                 var focusEvent = new FocusEvent("focus");
                 target.dispatchEvent(focusEvent);
 
-                currentlyFocus = target;
+                // currentlyFocused is set in the focus event handler
             };
 
             target.blur = function () {
                 // don't use jquery trigger as it will call .blur() => infinite loop!
                 var blurEvent = new FocusEvent("blur"); // Blur hérite de FocusEvent interface
                 target.dispatchEvent(blurEvent);
-                currentlyFocus = null;
             };
 
             target.name = $target.attr("name"); // this breaks if the name is later set via .attr(), we could use getter instead
+            // currentFocus is reset in the blur event handler
         },
 
 
@@ -812,6 +808,11 @@
          * @private
          */
         _handleFocus: function ($target) {
+            if (currentlyFocused !== null) {
+                currentlyFocused.blur();
+            }
+            currentlyFocused = $target[0];
+
             this._adjustTextNodePosition($target);
         },
 
@@ -840,6 +841,7 @@
 
                 $target._hasChanged = false;
             }
+            currentlyFocused = null;
         },
 
 
@@ -996,7 +998,7 @@
          * @private
          */
         _focusedPlugin: function () {
-            return currentlyFocus;
+            return currentlyFocused;
         },
 
 
