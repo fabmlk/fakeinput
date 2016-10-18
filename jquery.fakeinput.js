@@ -227,7 +227,8 @@
                 StyleHelper.removeProp("." + $target.attr("class").match(new RegExp(plugin.markerClassName + "-\\d+"))[0], prop);
             });
 
-            if (inst.options.integrateSelectors === true) {
+            // validations integration neeeds selector integrations, so in either case we impersonate selectors
+            if (inst.options.integrateSelectors === true || inst.options.integrateValidations === true) {
                 $target.attr("type", "text"); // force type text
                 this._impersonateInputSelectors($target);
             } else {
@@ -1047,10 +1048,11 @@
          * @param {String} extensionName - name of a the extension of the selector API
          * @param {String} fnName - name of a selector API function
          * @param {String} selector - the selector to query
+         * @param {Array} (Optional) otherArgs - the other arguments to transmit
          * @returns {*} the result of the native call
          * @private
          */
-        _querySelector: function (context, native, selector, jqNot, otherArgs) {
+        _querySelector: function (context, native, selector, otherArgs) {
             var match, modifiedSelector,
                 altered = selector,
                 otherArgs = otherArgs || [],
@@ -1076,9 +1078,7 @@
 
                     match = native([altered + ", " + selector].concat(otherArgs), context);
                     if (match !== null) {
-                        return $(match).not(".inert");
-                        // remove .inert elements from the set
-                        // return jqNot.call($(match), '.inert');
+                        return $(match).not(".inert"); // remove .inert elements from the set
                     }
                 }
             } catch(e) {}
@@ -1089,53 +1089,35 @@
 
         /**
          * Overrides the selector API to match the fake inputs when the input tag is present in a selector.
+         * Note: this used to override jquery selectors too but introduced some edge cases hard to debug.
+         * This was actually only mostly needed for jQuery delegation events that use a different path.
+         * If jQuery delegations are used to test for an input text, the client code must adjust for this, like
+         * using "[type='text']" instead of "input[type='text']".
          * @private
          */
         _impersonateInputSelectors: function ($target) {
-            var jqNot = $.fn.not,
-                markerUsesNativeSelector = this.markerClassName + "-uses-native-selector",
-                jqApi = ["not", "find", "filter", "is"]
-            ;
+            var markerUsesNativeSelector = this.markerClassName + "-uses-native-selector";
 
 
             $target.addClass(markerUsesNativeSelector);
 
             SelectorSpy.spy(document, "querySelector", function (proxy) {
                 return function (selector) {
-                    return plugin._querySelector(null, proxy, selector, jqNot);
+                    return plugin._querySelector(null, proxy, selector);
                 };
             });
 
             SelectorSpy.spy(document, "querySelectorAll", function (proxy) {
                 return function (selector) {
-                    return plugin._querySelector(null, proxy, selector, jqNot);
+                    return plugin._querySelector(null, proxy, selector);
                 };
             });
 
             SelectorSpy.spy($target[0], "matches", function (proxy) {
                 return function (selector) {
-                    return plugin._querySelector(null, proxy, selector, jqNot);
+                    return plugin._querySelector(null, proxy, selector);
                 };
             });
-
-            // jqApi.forEach(function (jqFn) {
-            //     SelectorSpy.spy($.fn, jqFn, function (proxy) {
-            //         return function (selector) {
-            //             return plugin._querySelector(this, proxy, selector);
-            //         };
-            //     });
-            // });
-
-            // Support for intercepting event delegation
-            // SelectorSpy.spy($, "find", function (native) {
-            //     var Sizzle = function (selector, context, results) {
-            //         return plugin._querySelector(this, native, selector, jqNot, [selector, context, results]);
-            //     };
-            //
-            //     $.extend(Sizzle, $.find);
-            //
-            //     return Sizzle;
-            // });
         },
 
         /**
