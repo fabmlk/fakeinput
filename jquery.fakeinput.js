@@ -19,6 +19,9 @@
  * - impersonation of CSS styles related to validation pseudo-classes (:invalid, :valid, :required...)
  * - impersonation of DOM Level 2 methods of element retreival (getElementById, getElementsByTagName, ....)
  * - auto-focus from click on matching label
+ * - support for impersonating jquery event delegation (2nd argument of on() method)
+ * - support for detecting if impersonated attributes are removed/reset from the client (DOM Mutation Observers)
+ * - limitation: document.activeElement cannot be simulated. The client must manually check the focus via getter method "focused".
  */
 
 (function (factory) {
@@ -92,22 +95,22 @@
 
     function FakeInput() {
         this.defaults = {
-            ignoredStyleProperties: [],/* List of css properties to ignore when calculating the fake input style.
-                                          When calculating the style of real input in the current context, a CSS rule with
-                                          the computed style will be inserted as a class and applied to the element.
-                                          But there are cases where we actually don't want to apply a certain computed property because
-                                          it will override an inherited style due to selectivity.
-                                          For instance, if a computed visibility is hidden because of a parent being hidden by inheritance,
-                                          if the user later changes the parent visibility to visible, the element will still preserve its
-                                          hidden visibility as it is still present in the css rule applied to it, which would typically not
-                                          be the expected behaviour from the user's perspective.
-                                          One way to automate this would be to discard any inherited properties, but figuring out what is
-                                          inherited and what is not when using getComputedStyle() is a no-go, so instead we let the user
-                                          handle individual cases manually. */
-            fireInput: true,           /* wether the "input" event should be fired */
-            fireChange: true,          /* wether the "change" event should be fired */
-            integrateSelectors: true,  /* wether to override the selector API to impersonate input tag in a selector */
-            integrateValidations: true /* wether to override the validation API  */
+            ignoredStyleProperties: [], /* List of css properties to ignore when calculating the fake input style.
+                                           When calculating the style of real input in the current context, a CSS rule with
+                                           the computed style will be inserted as a class and applied to the element.
+                                           But there are cases where we actually don't want to apply a certain computed property because
+                                           it will override an inherited style due to selectivity.
+                                           For instance, if a computed visibility is hidden because of a parent being hidden by inheritance,
+                                           if the user later changes the parent visibility to visible, the element will still preserve its
+                                           hidden visibility as it is still present in the css rule applied to it, which would typically not
+                                           be the expected behaviour from the user's perspective.
+                                           One way to automate this would be to discard any inherited properties, but figuring out what is
+                                           inherited and what is not when using getComputedStyle() is a no-go, so instead we let the user
+                                           handle individual cases manually. */
+            fireInput: true,            /* wether the "input" event should be fired */
+            fireChange: true,           /* wether the "change" event should be fired */
+            integrateSelectors: true,   /* wether to override the selector API to impersonate input tag in a selector */
+            integrateValidations: true, /* wether to override the validation API  */
         };
     }
 
@@ -757,7 +760,7 @@
                 selection.collapseToStart();
             }
 
-            if (e.clientX >= $fakeTextNode.width()) { // pointer was beyond the text node, in blank space
+            if (e.offsetX >= $fakeTextNode.width()) { // pointer was beyond the text node, in blank space
                 offset = realTextNode.nodeValue.length;
             } else { // pointer was somewhere inside...
 
