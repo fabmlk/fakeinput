@@ -190,6 +190,10 @@
             this._initEvents($target);
 
             this._optionPlugin(target, options);
+
+            if ($target.attr("placeholder")) {
+                this._initPlaceHolder($target);
+            }
         },
 
 
@@ -1000,6 +1004,45 @@
          */
         _focusedPlugin: function () {
             return currentlyFocused;
+        },
+
+
+
+        /**
+         * Simple simulated placeholder.
+         *
+         * @param {jQuery} $target - the fake jquery input
+         * @private
+         */
+        _initPlaceHolder: function ($target) {
+            var target = $target[0],
+                initialValue = $target.attr('placeholder'),
+                initialColor = target.style.color,
+                placeholderColor = "rgba(102, 102, 102, 0.69)"
+                ;
+
+            $target.css("color", placeholderColor);
+            $target.val(initialValue);
+
+            $target.focus(function () {
+                var placeholder = $target.attr("placeholder"),
+                    value = $target.val();
+
+                if (value === placeholder) {
+                    target.selectionStart = target.selectionEnd = 0;
+                    plugin._showCaret($target);
+                }
+
+                $target.css("color", initialColor);
+                $target.val(value.replace(placeholder, ""));
+            });
+
+            $target.blur(function () {
+                if ($target.val() === '') {
+                    $target.css("color", placeholderColor);
+                    $target.val(initialValue);
+                }
+            });
         },
 
 
