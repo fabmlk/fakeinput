@@ -29,6 +29,10 @@
 }
 
 .fab-fakeinput-mask {
+    /* center children vertically */
+    display: flex;
+    align-items: center;
+    
     position: relative;
     overflow: hidden;
     margin: 0;
