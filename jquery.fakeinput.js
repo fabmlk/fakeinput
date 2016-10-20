@@ -1447,7 +1447,8 @@
         _destroyPlugin: function (target) {
             var $target = $(target),
                 inst = $target.data(this.propertyName),
-                currentVal = $target.val()
+                currentVal = $target.val(),
+                ruleClass = $target.attr("class").match(new RegExp(this.markerClassName + '-' + '\\d+'))
             ;
 
             if (!$target.hasClass(this.markerClassName)) { // if plugin not initialized
@@ -1461,6 +1462,8 @@
                 eventListenerManager.removeListeners(this);
             });
 
+            StyleHelper.removeRule('.' + ruleClass); // remove created css rule
+
             $target.replaceWith(inst.originalElement); // jquery removes its own events listeners + data (also on children aka fake text node)
             $(inst.originalElement).val(currentVal);
 
@@ -1470,9 +1473,6 @@
                 $realInputProxy.remove();
                 $realInputProxy = $();
             }
-
-            // Note: we do not remove the inserted css rule when first creating the plugin.
-            // This is faster if the plugin is re-used after being destroyed.
         }
     });
 
