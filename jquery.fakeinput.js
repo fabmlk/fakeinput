@@ -936,7 +936,6 @@
                 plugin._handleMousedown($target, e);
 
                 plugin._showCaret($target);
-                console.log("mousedown");
             });
 
 
@@ -946,12 +945,10 @@
             eventListenerManager.addListener("focus", target, function () {
                 plugin._handleFocus($target);
                 plugin._showCaret($target);
-                console.log("focused");
             });
 
             eventListenerManager.addListener("blur", target, function () {
                 plugin._handleBlur($target);
-                console.log("blurred");
             });
 
             // Handling key events properly cross-browser is a pain in the ass.
@@ -991,7 +988,6 @@
 
             eventListenerManager.addListener("mouseup", target, function () {
                 plugin._handleMouseup($target);
-                console.log("mouseup");
             });
         },
 
