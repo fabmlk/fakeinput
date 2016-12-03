@@ -21,7 +21,9 @@
  * - auto-focus from click on matching label
  * - support for impersonating jquery event delegation (2nd argument of on() method)
  * - support for detecting if impersonated attributes are removed/reset from the client (DOM Mutation Observers)
- * - limitation: document.activeElement cannot be simulated. The client must manually check the focus via getter method "focused".
+ * - limitation: document.activeElement cannot be simulated (only supported in IE via setActive()).
+ *   The client must manually check the focus via getter method "focused".
+ * - limitation: even if we trigger a custom focus event on a fake input, it does make the element having real focus
  */
 
 (function (factory) {
@@ -305,7 +307,9 @@
                 visibleComputedStyle
             ;
 
-            if ((SelectorSpy.retreive($.fn, "is") || $.fn.is).call($target, "input[type='text']")) { // is our element already a real input text?
+            // is our element already a real input text?
+            // We used to override jQuery.is() but we don't anymore, maybe later ?
+            if ((SelectorSpy.retreive($.fn, "is") || $.fn.is).call($target, "input[type='text']")) {
                 $input = $target;
                 visibleComputedStyle = StyleHelper.getVisibleComputedStyle($input[0]);
             } else { // we create a fake input in the context of its parent
@@ -1133,9 +1137,11 @@
         /**
          * Overrides the selector API to match the fake inputs when the input tag is present in a selector.
          * Note: this used to override jquery selectors too but introduced some edge cases hard to debug.
-         * This was actually only mostly needed for jQuery delegation events that use a different path.
+         * This was actually only mostly needed for jQuery delegation events that use a different path (Sizzle.matches()).
          * If jQuery delegations are used to test for an input text, the client code must adjust for this, like
          * using "[type='text']" instead of "input[type='text']".
+         * UPDATE: we do override sizzle matchesSelector for basic :focus check.
+         * TODO: investigate if we can deepen the override of matchesSelector
          * @private
          */
         _impersonateInputSelectors: function ($target) {
@@ -1161,6 +1167,18 @@
                     return plugin._querySelector(null, proxy, selector);
                 };
             });
+
+            // $.find <=> internal Sizzle. Sizzle.matchesSelector() is called from $.fn.is().
+            // For now, we simply impersonate the ":focus" test.
+            SelectorSpy.spy($.find, "matchesSelector", function (proxy) {
+                return function (elem, expr) {
+                    if (currentlyFocused === elem && expr === ":focus") {
+                        return true;
+                    }
+                    return proxy([elem, expr]);
+                };
+            });
+
         },
 
         /**
