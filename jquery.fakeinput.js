@@ -21,9 +21,6 @@
  * - auto-focus from click on matching label
  * - support for impersonating jquery event delegation (2nd argument of on() method)
  * - support for detecting if impersonated attributes are removed/reset from the client (DOM Mutation Observers)
- * - limitation: document.activeElement cannot be simulated (only supported in IE via setActive()).
- *   The client must manually check the focus via getter method "focused".
- * - limitation: even if we trigger a custom focus event on a fake input, it does make the element having real focus
  */
 
 (function (factory) {
@@ -45,11 +42,10 @@
 
     var styleCount = 0;
 
-    var getters = ["focused"]; // list of getter methods (none for the moment)
+    var getters = []; // here should go the name of the plugin getter methods
+                      // (we used to have one but removed - leave it in case we go back to it in the future)
 
     var $realInputProxy = $(); // only one input proxy instance for everyone
-
-    var currentlyFocused = null; // will save the currently focus input
 
     var validationAPI = {
         htmlAttrs:  ["type", "pattern", "minlength", "maxlength", "min", "max"],
@@ -98,17 +94,17 @@
     function FakeInput() {
         this.defaults = {
             ignoredStyleProperties: [], /* List of css properties to ignore when calculating the fake input style.
-                                           When calculating the style of real input in the current context, a CSS rule with
-                                           the computed style will be inserted as a class and applied to the element.
-                                           But there are cases where we actually don't want to apply a certain computed property because
-                                           it will override an inherited style due to selectivity.
-                                           For instance, if a computed visibility is hidden because of a parent being hidden by inheritance,
-                                           if the user later changes the parent visibility to visible, the element will still preserve its
-                                           hidden visibility as it is still present in the css rule applied to it, which would typically not
-                                           be the expected behaviour from the user's perspective.
-                                           One way to automate this would be to discard any inherited properties, but figuring out what is
-                                           inherited and what is not when using getComputedStyle() is a no-go, so instead we let the user
-                                           handle individual cases manually. */
+             When calculating the style of real input in the current context, a CSS rule with
+             the computed style will be inserted as a class and applied to the element.
+             But there are cases where we actually don't want to apply a certain computed property because
+             it will override an inherited style due to selectivity.
+             For instance, if a computed visibility is hidden because of a parent being hidden by inheritance,
+             if the user later changes the parent visibility to visible, the element will still preserve its
+             hidden visibility as it is still present in the css rule applied to it, which would typically not
+             be the expected behaviour from the user's perspective.
+             One way to automate this would be to discard any inherited properties, but figuring out what is
+             inherited and what is not when using getComputedStyle() is a no-go, so instead we let the user
+             handle individual cases manually. */
             fireInput: true,            /* wether the "input" event should be fired */
             fireChange: true,           /* wether the "change" event should be fired */
             integrateSelectors: true,   /* wether to override the selector API to impersonate input tag in a selector */
@@ -152,7 +148,7 @@
                 $target = $(target),
                 currentValue = $target.prop("value") || $target.attr("value") || "",
                 inputStyles
-            ;
+                ;
 
             if ($target.hasClass(this.markerClassName) || // already attached or the proxy input
                 $target.hasClass(this.markerClassName + "-proxy")) {
@@ -210,7 +206,7 @@
             /* start of boilerplate code common to most jquery plugins */
             var $target = $(target),
                 inst = $target.data(this.propertyName) // retrieve current instance settings
-            ;
+                ;
 
             if (!options || (typeof options == 'string' && value == null)) {
                 // Get option
@@ -280,7 +276,7 @@
         _getTextNode: function ($target) {
             var $fakeTextNode = $target.children().children('.' + this.markerClassName + "-textnode"),
                 realTextNode = $fakeTextNode[0].childNodes[0]
-            ;
+                ;
 
             if (realTextNode === undefined) {
                 realTextNode = document.createTextNode("");
@@ -305,7 +301,7 @@
                 target = $target[0],
                 stylesToRestore = {},
                 visibleComputedStyle
-            ;
+                ;
 
             // is our element already a real input text?
             // We used to override jQuery.is() but we don't anymore, maybe later ?
@@ -360,7 +356,7 @@
         _impersonateInputAttributes: function ($target) {
             var target = $target[0],
                 $fakeTextNode = this._getTextNode($target)
-            ;
+                ;
 
             // define the getter & setter for the value property
             Object.defineProperty(target, "value", {
@@ -382,22 +378,7 @@
             // set selection attributes at the end
             target.selectionStart = target.selectionEnd = $fakeTextNode.text().length;
 
-            target.focus = function () {
-                // don't use jquery trigger as it will call .focus() => infinite loop!
-                var focusEvent = new FocusEvent("focus");
-                target.dispatchEvent(focusEvent);
-
-                // currentlyFocused is set in the focus event handler
-            };
-
-            target.blur = function () {
-                // don't use jquery trigger as it will call .blur() => infinite loop!
-                var blurEvent = new FocusEvent("blur"); // Blur hérite de FocusEvent interface
-                target.dispatchEvent(blurEvent);
-            };
-
             target.name = $target.attr("name"); // this breaks if the name is later set via .attr(), we could use getter instead
-            // currentFocus is reset in the blur event handler
         },
 
 
@@ -418,7 +399,7 @@
                 currentShift = parseFloat($fakeTextNode.css("left")),
                 range = document.createRange(),
                 left, rangeRect
-            ;
+                ;
 
             range.setStart(realTextNode, 0);
             range.setEnd(realTextNode, target.selectionEnd);
@@ -446,7 +427,7 @@
         _getBoundedCaretCoordinates: function ($target) {
             var caretCoords = this._getRelativeCaretCoordinates($target),
                 wrapperWidth = $target.children().width()
-            ;
+                ;
 
             caretCoords.left = Math.max(1, caretCoords.left);
             caretCoords.left = Math.min(wrapperWidth, caretCoords.left);
@@ -470,7 +451,7 @@
             var $fakeTextNode = this._getTextNode($target),
                 textIdx = $fakeTextNode.text().indexOf(text),
                 range
-            ;
+                ;
 
             if (textIdx === -1) {
                 return 0;
@@ -497,7 +478,7 @@
             var target = $target[0],
                 selStart = target.selectionStart,
                 charsRelativeToCaret = target.value.substring(selStart, selStart + numChars)
-            ;
+                ;
 
             return this._getTextContentWidth($target, charsRelativeToCaret);
         },
@@ -532,7 +513,7 @@
         _shiftTextNodeRight: function ($target, value) {
             var $fakeTextNode = this._getTextNode($target),
                 currentShiftLeft = parseInt($fakeTextNode.css("left"), 0) || 0
-            ;
+                ;
 
             value = Math.min(value, Math.abs(currentShiftLeft)); // right shift must never be greater than 0
             $fakeTextNode.css("left", "+=" + value);
@@ -550,7 +531,7 @@
         _showCaret: function ($target) {
             var coords = this._getBoundedCaretCoordinates($target),
                 $fakeCaret = this._getCaret($target)
-            ;
+                ;
 
             $fakeCaret.css({
                 // reminder: jquery converts a number to string and append "px" when it detects a number
@@ -589,7 +570,7 @@
                 value = target.value,
                 selection = window.getSelection(),
                 deletedTextWidth
-            ;
+                ;
 
             if (selection.anchorNode === selection.focusNode &&
                 selection.isCollapsed === false) { // only our fake input has selection and is visible
@@ -673,7 +654,7 @@
             var caretCoordsLeft = this._getRelativeCaretCoordinates($target).left,
                 wrapperWidth = $target.children().width(),
                 shift
-            ;
+                ;
             // Example right shift algo:
             //
             //                    shift
@@ -708,7 +689,7 @@
             var selection = window.getSelection(),
                 target = $target[0],
                 value
-            ;
+                ;
 
             if (selection.anchorNode === selection.focusNode &&
                 selection.isCollapsed === false) { // only our fake input has selection and is visible
@@ -761,7 +742,7 @@
                 $fakeTextNode = this._getTextNode($target),
                 realTextNode = $fakeTextNode[0].childNodes[0],
                 selection = window.getSelection()
-            ;
+                ;
 
             // this is an over-simplification: real inputs handle moving selection around etc... here we simply discard it.
             if (selection.isCollapsed === false) {
@@ -821,11 +802,6 @@
          * @private
          */
         _handleFocus: function ($target) {
-            if (currentlyFocused !== null) {
-                currentlyFocused.blur();
-            }
-            currentlyFocused = $target[0];
-
             this._adjustTextNodePosition($target);
         },
 
@@ -854,7 +830,6 @@
 
                 $target._hasChanged = false;
             }
-            currentlyFocused = null;
         },
 
 
@@ -868,7 +843,7 @@
         _handleMouseup: function ($target) {
             var selection = window.getSelection(),
                 target = $target[0]
-            ;
+                ;
 
             if (selection.anchorNode === selection.focusNode &&
                 selection.isCollapsed === false) {
@@ -1001,18 +976,6 @@
 
 
         /**
-         * Returns the currently focused input.
-         * Call it directly from the plugin namespace: $.fn.fakeinput("focused")
-         * @returns {Element|null}
-         * @private
-         */
-        _focusedPlugin: function () {
-            return currentlyFocused;
-        },
-
-
-
-        /**
          * Simple simulated placeholder.
          *
          * @param {jQuery} $target - the fake jquery input
@@ -1104,7 +1067,7 @@
                 altered = selector,
                 otherArgs = otherArgs || [],
                 markerUsesNativeSelector = plugin.markerClassName + "-uses-native-selector"
-            ;
+                ;
 
 
             if (selector.indexOf("input") > -1) {
@@ -1140,8 +1103,6 @@
          * This was actually only mostly needed for jQuery delegation events that use a different path (Sizzle.matches()).
          * If jQuery delegations are used to test for an input text, the client code must adjust for this, like
          * using "[type='text']" instead of "input[type='text']".
-         * UPDATE: we do override sizzle matchesSelector for basic :focus check.
-         * TODO: investigate if we can deepen the override of matchesSelector
          * @private
          */
         _impersonateInputSelectors: function ($target) {
@@ -1168,16 +1129,16 @@
                 };
             });
 
-            // $.find <=> internal Sizzle. Sizzle.matchesSelector() is called from $.fn.is().
-            // For now, we simply impersonate the ":focus" test.
-            SelectorSpy.spy($.find, "matchesSelector", function (proxy) {
-                return function (elem, expr) {
-                    if (currentlyFocused === elem && expr === ":focus") {
-                        return true;
-                    }
-                    return proxy([elem, expr]);
-                };
-            });
+            // // $.find <=> internal Sizzle. Sizzle.matchesSelector() is called from $.fn.is().
+            // // For now, we simply impersonate the ":focus" test.
+            // SelectorSpy.spy($.find, "matchesSelector", function (proxy) {
+            //     return function (elem, expr) {
+            //         if (currentlyFocused === elem && expr === ":focus") {
+            //             return true;
+            //         }
+            //         return proxy([elem, expr]);
+            //     };
+            // });
 
         },
 
@@ -1221,7 +1182,7 @@
                 $parentForm = $target.closest("form") || {},
                 parentForm = $parentForm[0] || {},
                 markerUsesValidation = this.markerClassName + "-uses-validation"
-            ;
+                ;
 
             if (!$realInputProxy.length) {
                 $realInputProxy = $("<input type='text' class='" + this.markerClassName + "-proxy" + "'>");
@@ -1301,7 +1262,7 @@
                 parentForm.checkValidity = function () {
                     var isValid = true,
                         childrenInputs = $parentForm.find("input")
-                    ;
+                        ;
 
                     if (parentForm.id) {
                         childrenInputs.add($("input[form=" + parentForm.id + "]")); // eventual external inputs
@@ -1418,7 +1379,7 @@
             var ret,
                 args,
                 input = $input[0]
-            ;
+                ;
 
             plugin._clearHtmlValidation($target, $input);
 
@@ -1461,7 +1422,7 @@
                 markerUsesValidation = this.markerClassName + "-uses-validation",
                 $parentForm = $target.closest("form." + markerUsesValidation),
                 parentForm = $parentForm[0]
-            ;
+                ;
 
             $target.removeClass(this.markerClassName + "-invalid", this.markerClassName + "-valid", markerUsesValidation);
 
@@ -1506,7 +1467,7 @@
                 inst = $target.data(this.propertyName),
                 currentVal = $target.val(),
                 ruleClass = $target.attr("class").match(new RegExp(this.markerClassName + '-' + '\\d+'))
-            ;
+                ;
 
             if (!$target.hasClass(this.markerClassName)) { // if plugin not initialized
                 return;
