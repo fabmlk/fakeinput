@@ -17,7 +17,6 @@
  * - outline styling on focus
  * - selectionchange event (not yet supported by browsers)
  * - impersonation of CSS styles related to validation pseudo-classes (:invalid, :valid, :required...)
- * - impersonation of DOM Level 2 methods of element retreival (getElementById, getElementsByTagName, ....)
  * - auto-focus from click on matching label
  * - support for impersonating jquery event delegation (2nd argument of on() method)
  * - support for detecting if impersonated attributes are removed/reset from the client (DOM Mutation Observers)
@@ -597,7 +596,7 @@
          * @private
          */
         _fireInputEvent: function ($target) {
-            // Note: la spec defines a InputEvent interface but the constructor is not yet
+            // Note: the spec defines a InputEvent interface but the constructor is not yet
             // implemented in Chrome (Chromium status: in development) so instead we use
             // a generic Event object.
             var inputEvent = new Event("input", {
@@ -1129,17 +1128,14 @@
                 };
             });
 
-            // // $.find <=> internal Sizzle. Sizzle.matchesSelector() is called from $.fn.is().
-            // // For now, we simply impersonate the ":focus" test.
-            // SelectorSpy.spy($.find, "matchesSelector", function (proxy) {
-            //     return function (elem, expr) {
-            //         if (currentlyFocused === elem && expr === ":focus") {
-            //             return true;
-            //         }
-            //         return proxy([elem, expr]);
-            //     };
-            // });
-
+            SelectorSpy.spy(document, "getElementsByTagName", function (proxy) {
+                return function (tagName) {
+                    if (tagName === "input") {
+                        return document.querySelectorAll("." + markerUsesNativeSelector);
+                    }
+                    return proxy(tagName);
+                };
+            });
         },
 
         /**
