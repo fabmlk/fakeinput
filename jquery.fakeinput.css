@@ -80,6 +80,6 @@
     animation: 1s blink infinite steps(1);
 }
 
-.fab-fakeinput-doppleganger {
-    position: absolute;
+.fab-fakeinput-proxy {
+    display: none;
 }

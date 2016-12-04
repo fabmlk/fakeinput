@@ -19,6 +19,7 @@
  * - impersonation of CSS styles related to validation pseudo-classes (:invalid, :valid, :required...)
  * - auto-focus from click on matching label
  * - support for impersonating jquery event delegation (2nd argument of on() method)
+ * - full support for special jquery filters like :visible. Partially supported for simple selector (see notes).
  * - support for detecting if impersonated attributes are removed/reset from the client (DOM Mutation Observers)
  * - impersonation of document.getElementsByTagName("input") returns Array instead of Live HTMLCollection
  */
@@ -1100,9 +1101,20 @@
         /**
          * Overrides the selector API to match the fake inputs when the input tag is present in a selector.
          * Note: this used to override jquery selectors too but introduced some edge cases hard to debug.
-         * This was actually only mostly needed for jQuery delegation events that use a different path (Sizzle.matches()).
          * If jQuery delegations are used to test for an input text, the client code must adjust for this, like
          * using "[type='text']" instead of "input[type='text']".
+         * Also jquery special filters like ":visible" are not supported if the selector is "complex":
+         * what jQuery does first is establishing if the selector is "complex" or "simple".
+         * If it is complex, it tries to invoke the native qsa API, but if it contains ":visible", this will raise an error that jQuery
+         * will capture and pass on to his own implementations.
+         * If it is simple enough, jQuery will call native DOM Level 2 API like document.getElementsByTagName() which we impersonate.
+         * Examples:
+         *  $("input"); // OK
+         *  $("input:visible"); // OK
+         *  $("input[type='text']"); // OK
+         *  $("input[type='text']:visible"); // NOK
+         *  $('body').on("keyup", "[type='text'], function () {}); // OK
+         *  $('body').on("keyup", "input[type='text'], function () {}); // NOK
          * @private
          */
         _impersonateInputSelectors: function ($target) {
@@ -1136,7 +1148,7 @@
                         // HTMLCollection are "live" in the DOM when array are "static". So if the client code expect
                         // indeed a live collection, we screw it !
                         // (there seem to be no way to add or merge elements to an existing HTMLCollection)
-                        return $("input", "." + markerUsesNativeSelector).get();
+                        return $("input, ." + markerUsesNativeSelector).get();
                     }
                     return proxy(tagName);
                 };
