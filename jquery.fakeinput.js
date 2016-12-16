@@ -869,7 +869,14 @@
             if (originalEvent instanceof MouseEvent) {
                 event = new MouseEvent(originalEvent.type, originalEvent);
             } else if (originalEvent instanceof TouchEvent) {
-                event = new TouchEvent(originalEvent.type, originalEvent);
+                try {
+                    event = new TouchEvent(originalEvent.type, originalEvent);
+                } catch (e) {
+                    // Android Browser (maybe others?) trigger a TypeError exception
+                    // when trying to create a TouchEvent() manually
+                    originalEvent.stopImmediatePropagation();
+                    return;
+                }
             }
 
             originalEvent.stopImmediatePropagation();
