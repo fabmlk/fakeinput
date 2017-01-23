@@ -1056,8 +1056,9 @@
                         ret += token.value;
                     }
                 });
+                ret += ','; // don't forget to add comma
             }
-            return ret;
+            return ret.replace(/,+$/, ""); // remove trailing commas if any
         },
 
         /**
