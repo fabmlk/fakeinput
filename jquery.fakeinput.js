@@ -22,6 +22,8 @@
  * - full support for special jquery filters like :visible. Partially supported for simple selector (see notes).
  * - support for detecting if impersonated attributes are removed/reset from the client (DOM Mutation Observers)
  * - impersonation of document.getElementsByTagName("input") returns Array instead of Live HTMLCollection
+ * - impersonation of selector API or DOM Level 1 node retreival on elements other than document (subtrees)
+ * - impersonation of constraint validation API does not bother checking if the element has a datalist ancestor (should be barred from constraint validation as per spec)
  */
 
 (function (factory) {
@@ -50,7 +52,8 @@
 
     var validationAPI = {
         htmlAttrs:  ["type", "pattern", "minlength", "maxlength", "min", "max"],
-        htmlProps: ["required", "novalidate", "formnovalidate"],
+        // don't forget "readonly" and "disabled" as the element is "barred from constraint validation" if present (cf standard spec)
+        htmlProps: ["required", "novalidate", "formnovalidate", "readonly", "disabled"],
         oAttrs: ["validationMessage", "willValidate", "validity"],
         fns: ["checkValidity", "setCustomValidity"]
     };
@@ -151,7 +154,7 @@
                 inputStyles
                 ;
 
-            if ($target.hasClass(this.markerClassName) || // already attached or the proxy input
+            if (!this._isBrowserCompatible() || $target.hasClass(this.markerClassName) || // no browser support or already attached or it is the proxy input
                 $target.hasClass(this.markerClassName + "-proxy")) {
                 return;
             }
@@ -193,6 +196,30 @@
             if ($target.attr("placeholder")) {
                 this._initPlaceHolder($target);
             }
+        },
+
+
+        /**
+         * Check if browser supports range API & selection API.
+         *
+         * @returns {boolean} - wether or not the browser is compatible
+         * @private
+         */
+        _isBrowserCompatible: function () {
+            var $body = $("body"),
+                cached = $body.data(this.propertyName + "-support"),
+                isCompatible = cached
+                ;
+
+            if (cached === undefined) {
+                isCompatible = (typeof document.createRange === "function") &&
+                    (typeof document.caretPositionFromPoint === "function" || typeof document.caretRangeFromPoint === "function") &&
+                    (typeof document.getSelection === "function");
+
+                $body.data(this.propertyName + "-support", isCompatible); // cache results
+            }
+
+            return isCompatible;
         },
 
 
@@ -359,6 +386,16 @@
                 $fakeTextNode = this._getTextNode($target)
                 ;
 
+            // Impersonate DOM's nodeName & tagName as returning "INPUT"
+            Object.defineProperties(target, {
+                "nodeName": {
+                    value: "INPUT"
+                },
+                "tagName": {
+                    value: "INPUT"
+                }
+            });
+
             // define the getter & setter for the value property
             Object.defineProperty(target, "value", {
                 get: function () {
@@ -381,6 +418,7 @@
 
             target.name = $target.attr("name"); // this breaks if the name is later set via .attr(), we could use getter instead
         },
+
 
 
         /**
@@ -1189,7 +1227,7 @@
 
         /**
          * Impersonate the validation API on the fake input and the parent form.
-         * WARNING: the parent form is a accessed via a closure and is not marked with a plugin marker class name.
+         * WARNING: the parent form is accessed via a closure and is not marked with a plugin marker class name.
          * If the client code move the fake input around into a new form, the new form will not be impersonated.
          * If the parent form is replaced or removed, the closured form element will not be garbage-collected.
          * If the novalidate attribute of the form is changed by the client code, our custom form validation will fail
@@ -1464,7 +1502,6 @@
                 $parentForm.find("[type='submit']").off("click." + this.propertyName);
             }
         },
-
 
 
 
