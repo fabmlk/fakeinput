@@ -24,6 +24,7 @@
  * - impersonation of document.getElementsByTagName("input") returns Array instead of Live HTMLCollection
  * - impersonation of selector API or DOM Level 1 node retreival on elements other than document (subtrees)
  * - impersonation of constraint validation API does not bother checking if the element has a datalist ancestor (should be barred from constraint validation as per spec)
+ * - the list attribute and its related <datalist>. Though it has been tested to be partly compatible with jQuery UI autocomplete widget.
  */
 
 (function (factory) {
