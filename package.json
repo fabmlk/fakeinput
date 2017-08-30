@@ -8,16 +8,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fabmlk/jquery-fakeinput.git"
+    "url": "git+http://gitlab.intra.misiv.fr/tms/jquery-fakeinput.git"
   },
   "author": "fabien lanoux",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/fabmlk/jquery-fakeinput/issues"
+    "url": "http://gitlab.intra.misiv.fr/tms/jquery-fakeinput/issues"
   },
-  "homepage": "https://github.com/fabmlk/jquery-fakeinput#readme",
+  "homepage": "http://gitlab.intra.misiv.fr/tms/jquery-fakeinput",
   "dependencies": {
-    "selectorspy": "https://github.com/fabmlk/selectorspy.git",
-    "stylehelper": "https://github.com/fabmlk/stylehelper.git"
+    "selectorspy": "git+http://gitlab.intra.misiv.fr/tms/selectorspy.git",
+    "stylehelper": "git+http://gitlab.intra.misiv.fr/tms/stylehelper.git"
   }
 }
