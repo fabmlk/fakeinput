@@ -52,17 +52,20 @@
     var $realInputProxy = $(); // only one input proxy instance for everyone
 
     var validationAPI = {
-        htmlAttrs:  ["type", "pattern", "minlength", "maxlength", "min", "max"],
+        htmlAttrs: ["type", "pattern", "minlength", "maxlength", "min", "max"],
         // don't forget "readonly" and "disabled" as the element is "barred from constraint validation" if present (cf standard spec)
         htmlProps: ["required", "novalidate", "formnovalidate", "readonly", "disabled"],
         oAttrs: ["validationMessage", "willValidate", "validity"],
         fns: ["checkValidity", "setCustomValidity"]
     };
 
+    // offical list of mouse & touch events: https://developer.mozilla.org/fr/docs/Web/Events
+    var mouseEventsList = ["mousedown", "mouseenter", "mouseleave", "mousemove", "mouseout", "mouseover", "mouseup", "show", "click", "dblclick", "contextmenu"];
+    var touchEventsList = ["touchcancel", "touchend", "touchenter", "touchleave", "touchmove", "touchstart"];
+
     // simple events manager for plain-js/non-jquery events
     var eventListenerManager = {
-        childEvents: ["mousedown", "click", "mouseup", "dblclick", "mousemove", "mouseover", "mouseout", "mousewheel",
-            "touchstart", "touchend", "touchcancel"], // all child of a fake input will intercept those events
+        childEvents: mouseEventsList.concat(touchEventsList), // all child of a fake input will intercept those events
 
         listeners: [], // listeners stack
 
@@ -110,9 +113,9 @@
              One way to automate this would be to discard any inherited properties, but figuring out what is
              inherited and what is not when using getComputedStyle() is a no-go, so instead we let the user
              handle individual cases manually. */
-            fireInput: true,            /* wether the "input" event should be fired */
-            fireChange: true,           /* wether the "change" event should be fired */
-            integrateSelectors: true,   /* wether to override the selector API to impersonate input tag in a selector */
+            fireInput: true, /* wether the "input" event should be fired */
+            fireChange: true, /* wether the "change" event should be fired */
+            integrateSelectors: true, /* wether to override the selector API to impersonate input tag in a selector */
             integrateValidations: true, /* wether to override the validation API  */
         };
     }
@@ -153,7 +156,7 @@
                 $target = $(target),
                 currentValue = $target.prop("value") || $target.attr("value") || "",
                 inputStyles
-                ;
+            ;
 
             if (!this._isBrowserCompatible() || $target.hasClass(this.markerClassName) || // no browser support or already attached or it is the proxy input
                 $target.hasClass(this.markerClassName + "-proxy")) {
@@ -184,7 +187,7 @@
             $target.attr("tabindex", "1") // make it focusable/tabbable
                 .html("<div class='" + this.markerClassName + "-mask" + "'>" + // block wrapper
                     "<span class='" + this.markerClassName + "-textnode'>" + currentValue + "</span>" + // text node
-                    "<span class='"+ this.markerClassName +"-caret' style='visibility: hidden'></span>" + // caret
+                    "<span class='" + this.markerClassName + "-caret' style='visibility: hidden'></span>" + // caret
                     "</div>");
 
             $target._hasChanged = false; // we will use this to trigger change event if needed
@@ -210,7 +213,7 @@
             var $body = $("body"),
                 cached = $body.data(this.propertyName + "-support"),
                 isCompatible = cached
-                ;
+            ;
 
             if (cached === undefined) {
                 isCompatible = (typeof document.createRange === "function") &&
@@ -235,7 +238,7 @@
             /* start of boilerplate code common to most jquery plugins */
             var $target = $(target),
                 inst = $target.data(this.propertyName) // retrieve current instance settings
-                ;
+            ;
 
             if (!options || (typeof options == 'string' && value == null)) {
                 // Get option
@@ -305,7 +308,7 @@
         _getTextNode: function ($target) {
             var $fakeTextNode = $target.children().children('.' + this.markerClassName + "-textnode"),
                 realTextNode = $fakeTextNode[0].childNodes[0]
-                ;
+            ;
 
             if (realTextNode === undefined) {
                 realTextNode = document.createTextNode("");
@@ -315,7 +318,6 @@
 
             return $fakeTextNode;
         },
-
 
 
         /**
@@ -330,7 +332,7 @@
                 target = $target[0],
                 stylesToRestore = {},
                 visibleComputedStyle
-                ;
+            ;
 
             // is our element already a real input text?
             // We used to override jQuery.is() but we don't anymore, maybe later ?
@@ -375,7 +377,6 @@
         },
 
 
-
         /**
          * Impersonate the relevant attributes specific to a real text input.
          *
@@ -385,7 +386,7 @@
         _impersonateInputAttributes: function ($target) {
             var target = $target[0],
                 $fakeTextNode = this._getTextNode($target)
-                ;
+            ;
 
             // Impersonate DOM's nodeName & tagName as returning "INPUT"
             Object.defineProperties(target, {
@@ -421,7 +422,6 @@
         },
 
 
-
         /**
          * Retrieves the the new caret coordinates based on current selectionStart/selectionEnd of the fake input.
          * Note: the implementation changed from absolute to relative coordinates (when there was only one caret instance).
@@ -439,7 +439,7 @@
                 currentShift = parseFloat($fakeTextNode.css("left")),
                 range = document.createRange(),
                 left, rangeRect
-                ;
+            ;
 
             range.setStart(realTextNode, 0);
             range.setEnd(realTextNode, target.selectionEnd);
@@ -467,7 +467,7 @@
         _getBoundedCaretCoordinates: function ($target) {
             var caretCoords = this._getRelativeCaretCoordinates($target),
                 wrapperWidth = $target.children().width()
-                ;
+            ;
 
             caretCoords.left = Math.max(1, caretCoords.left);
             caretCoords.left = Math.min(wrapperWidth, caretCoords.left);
@@ -491,7 +491,7 @@
             var $fakeTextNode = this._getTextNode($target),
                 textIdx = $fakeTextNode.text().indexOf(text),
                 range
-                ;
+            ;
 
             if (textIdx === -1) {
                 return 0;
@@ -518,7 +518,7 @@
             var target = $target[0],
                 selStart = target.selectionStart,
                 charsRelativeToCaret = target.value.substring(selStart, selStart + numChars)
-                ;
+            ;
 
             return this._getTextContentWidth($target, charsRelativeToCaret);
         },
@@ -540,7 +540,6 @@
         },
 
 
-
         /**
          * Shift the inner fake text node right after we:
          *   - deleted a portion of the text
@@ -553,13 +552,11 @@
         _shiftTextNodeRight: function ($target, value) {
             var $fakeTextNode = this._getTextNode($target),
                 currentShiftLeft = parseInt($fakeTextNode.css("left"), 0) || 0
-                ;
+            ;
 
             value = Math.min(value, Math.abs(currentShiftLeft)); // right shift must never be greater than 0
             $fakeTextNode.css("left", "+=" + value);
         },
-
-
 
 
         /**
@@ -571,7 +568,7 @@
         _showCaret: function ($target) {
             var coords = this._getBoundedCaretCoordinates($target),
                 $fakeCaret = this._getCaret($target)
-                ;
+            ;
 
             $fakeCaret.css({
                 // reminder: jquery converts a number to string and append "px" when it detects a number
@@ -610,7 +607,7 @@
                 value = target.value,
                 selection = window.getSelection(),
                 deletedTextWidth
-                ;
+            ;
 
             if (selection.anchorNode === selection.focusNode &&
                 selection.isCollapsed === false) { // only our fake input has selection and is visible
@@ -694,7 +691,7 @@
             var caretCoordsLeft = this._getRelativeCaretCoordinates($target).left,
                 wrapperWidth = $target.children().width(),
                 shift
-                ;
+            ;
             // Example right shift algo:
             //
             //                    shift
@@ -729,7 +726,7 @@
             var selection = window.getSelection(),
                 target = $target[0],
                 value
-                ;
+            ;
 
             if (selection.anchorNode === selection.focusNode &&
                 selection.isCollapsed === false) { // only our fake input has selection and is visible
@@ -782,7 +779,7 @@
                 $fakeTextNode = this._getTextNode($target),
                 realTextNode = $fakeTextNode[0].childNodes[0],
                 selection = window.getSelection()
-                ;
+            ;
 
             // this is an over-simplification: real inputs handle moving selection around etc... here we simply discard it.
             if (selection.isCollapsed === false) {
@@ -883,7 +880,7 @@
         _handleMouseup: function ($target) {
             var selection = window.getSelection(),
                 target = $target[0]
-                ;
+            ;
 
             if (selection.anchorNode === selection.focusNode &&
                 selection.isCollapsed === false) {
@@ -905,9 +902,11 @@
             var event;
 
             // create new event from current event data
-            if (originalEvent instanceof MouseEvent) {
+            if (originalEvent instanceof MouseEvent
+                || mouseEventsList.indexOf(originalEvent.type) !== -1) { // in case the mouse event was faked by third-party scripts (Ex: evt = document.createEvent('Event'); evt.type = "click";)
                 event = new MouseEvent(originalEvent.type, originalEvent);
-            } else if (originalEvent instanceof TouchEvent) {
+            } else if (originalEvent instanceof TouchEvent
+                || touchEventsList.indexOf(originalEvent.type) !== -1) { // idem above but for faked touch events
                 try {
                     event = new TouchEvent(originalEvent.type, originalEvent);
                 } catch (e) {
@@ -916,6 +915,10 @@
                     originalEvent.stopImmediatePropagation();
                     return;
                 }
+            } else { // mouse of touch events fired, but does not match any of the listed ones ?? Maybe a new HTML5 event ?
+                // too bad, for now, in that case it does not support impersonation !
+                // Possible solution: copy all properties manually instead (ex https://github.com/Bernardo-Castilho/dragdroptouch/blob/31b94f433de8b475ee3c2ce687ea7b10e751579f/DragDropTouch.js#L369)
+                event = originalEvent;
             }
 
             originalEvent.stopImmediatePropagation();
@@ -1033,7 +1036,7 @@
                 initialValue = $target.attr('placeholder'),
                 initialColor = target.style.color,
                 placeholderColor = "rgba(102, 102, 102, 0.69)"
-                ;
+            ;
 
             $target.css("color", placeholderColor);
             $target.val(initialValue);
@@ -1086,10 +1089,10 @@
                 tokens[i].forEach(function (token) {
                     if (token.type === "TAG" && token.value === tagName) {
                         ret += impersonator;
-                    }  else if (token.type === "PSEUDO") {
+                    } else if (token.type === "PSEUDO") {
                         ret += ":" + token.matches[0] +
                             (token.matches[1] ? // pseudo function, like :pseudo(...) => recursivity
-                            "(" + plugin._impersonateTagName(token.matches[1], tagName, impersonator) + ")" :
+                                "(" + plugin._impersonateTagName(token.matches[1], tagName, impersonator) + ")" :
                                 ""); // simple pseudo, like :pseudo => nothing to add
                     } else {
                         ret += token.value;
@@ -1115,7 +1118,7 @@
                 altered = selector,
                 otherArgs = otherArgs || [],
                 markerUsesNativeSelector = plugin.markerClassName + "-uses-native-selector"
-                ;
+            ;
 
 
             if (selector.indexOf("input") > -1) {
@@ -1139,7 +1142,8 @@
                         return $(match).not(".inert"); // remove .inert elements from the set
                     }
                 }
-            } catch(e) {}
+            } catch (e) {
+            }
 
             return $(native([selector].concat(otherArgs), context)).not(".inert");
         },
@@ -1218,7 +1222,6 @@
         },
 
 
-
         //////////////////////////////////////////////////////////////////////////////////
         //                                                                              //
         //                           CONSTRAINT VALIDATION API                          //
@@ -1242,7 +1245,7 @@
                 $parentForm = $target.closest("form") || {},
                 parentForm = $parentForm[0] || {},
                 markerUsesValidation = this.markerClassName + "-uses-validation"
-                ;
+            ;
 
             if (!$realInputProxy.length) {
                 $realInputProxy = $("<input type='text' class='" + this.markerClassName + "-proxy" + "'>");
@@ -1322,7 +1325,7 @@
                 parentForm.checkValidity = function () {
                     var isValid = true,
                         childrenInputs = $parentForm.find("input")
-                        ;
+                    ;
 
                     if (parentForm.id) {
                         childrenInputs.add($("input[form=" + parentForm.id + "]")); // eventual external inputs
@@ -1439,7 +1442,7 @@
             var ret,
                 args,
                 input = $input[0]
-                ;
+            ;
 
             plugin._clearHtmlValidation($target, $input);
 
@@ -1482,7 +1485,7 @@
                 markerUsesValidation = this.markerClassName + "-uses-validation",
                 $parentForm = $target.closest("form." + markerUsesValidation),
                 parentForm = $parentForm[0]
-                ;
+            ;
 
             $target.removeClass(this.markerClassName + "-invalid", this.markerClassName + "-valid", markerUsesValidation);
 
@@ -1505,7 +1508,6 @@
         },
 
 
-
         //////////////////////////////////////////////////////////////////////////////////
         //                                                                              //
         //                              PLUGIN DESTRUCTION                              //
@@ -1526,7 +1528,7 @@
                 inst = $target.data(this.propertyName),
                 currentVal = $target.val(),
                 ruleClass = $target.attr("class").match(new RegExp(this.markerClassName + '-' + '\\d+'))
-                ;
+            ;
 
             if (!$target.hasClass(this.markerClassName)) { // if plugin not initialized
                 return;
@@ -1562,9 +1564,9 @@
      * @param otherArgs {Array} (Optional) any other arguments for the method
      * @returns {boolean} true if the method is a getter, false if not
      */
-    function isNotChained (method, otherArgs) {
+    function isNotChained(method, otherArgs) {
         if (method === 'option' && (otherArgs.length == 0 ||
-            (otherArgs.length === 1 && typeof otherArgs[0] === 'string'))) {
+                (otherArgs.length === 1 && typeof otherArgs[0] === 'string'))) {
             return true;
         }
         return $.inArray(method, getters) > -1;
